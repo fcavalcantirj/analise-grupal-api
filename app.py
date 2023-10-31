@@ -94,6 +94,11 @@ def build_lda_model(texts, num_topics=5):
     lda_model = LdaModel(corpus, num_topics=num_topics, id2word=dictionary, passes=15)
     return lda_model, corpus, dictionary
 
+
+@app.route('/healthcheck', methods=['GET'])
+def healthcheck():
+    return jsonify(success=True), 200
+
 @app.route('/whatsapp/message/topic_modeling', methods=['POST'])
 def topic_modeling():
     if 'file' not in request.files:
