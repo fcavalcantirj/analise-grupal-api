@@ -22,7 +22,7 @@ Uma plataforma moderna e open-source para analisar dados de bate-papo do WhatsAp
 
 ### Pré-requisitos
 
-Liste os pré-requisitos (por exemplo, Node.js, Python, etc.)
+Python, virtualenvwrapper de preferência
 
 ### Instalação
 
