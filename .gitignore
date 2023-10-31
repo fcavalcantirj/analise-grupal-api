@@ -1,0 +1,68 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*.pyo
+*.egg-info/
+*.egg
+
+# Virtual environment
+venv/
+*.venv
+.env
+
+# Flask instance-specific files
+instance/
+
+# Flask file-based session storage
+.flask_session/
+
+# pyenv
+.python-version
+
+# IDEs and editors
+# PyCharm (JetBrains IDE)
+.idea/
+
+# VS Code
+.vscode/
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# Operating systems
+# macOS
+.DS_Store
+
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# Logs and databases
+*.log
+*.sqlite
+
+# Others
+*.pid
+*.pot
+*.pyc
+*.db
+*.log
+*.sqlite3
+db.sqlite3
+
+# Distribution / packaging
+Pipfile.lock
+*.tar.gz
+
+# Unit test / coverage reports
+htmlcov/
+.coverage
+.tox/
+
+# dotenv environment variables file
+.env
+.env.test
+
+# Temporary files
+*.tmp
