@@ -99,9 +99,9 @@ def build_lda_model(texts, num_topics=5):
 
 @app.route('/')
 def home():
-    origin = request.headers.get('Origin') or request.headers.get('Referer')
-    if not origin or any(allowed_host in origin for allowed_host in ALLOWED_HOSTS):
-        abort(403)  # Forbidden
+    # origin = request.headers.get('Origin') or request.headers.get('Referer')
+    # if not origin or any(allowed_host in origin for allowed_host in ALLOWED_HOSTS):
+    #     abort(403)  # Forbidden
     return jsonify({"message": "Hello, allowed host!"})
 
 
@@ -111,9 +111,9 @@ def healthcheck():
 
 @app.route('/whatsapp/message/topic_modeling', methods=['POST'])
 def topic_modeling():
-    origin = request.headers.get('Origin') or request.headers.get('Referer')
-    if not origin or any(allowed_host in origin for allowed_host in ALLOWED_HOSTS):
-        abort(403)  # Forbidden
+    # origin = request.headers.get('Origin') or request.headers.get('Referer')
+    # if not origin or any(allowed_host in origin for allowed_host in ALLOWED_HOSTS):
+    #     abort(403)  # Forbidden
 
     if 'file' not in request.files:
         return 'No file part', 400
@@ -157,9 +157,9 @@ def extract_emojis(text):
 
 @app.route('/whatsapp/message/avg_sentiment_per_person', methods=['POST'])
 def plot_avg_sentiment_per_person():
-    origin = request.headers.get('Origin') or request.headers.get('Referer')
-    if not origin or any(allowed_host in origin for allowed_host in ALLOWED_HOSTS):
-        abort(403)  # Forbidden
+    # origin = request.headers.get('Origin') or request.headers.get('Referer')
+    # if not origin or any(allowed_host in origin for allowed_host in ALLOWED_HOSTS):
+    #     abort(403)  # Forbidden
 
     # Ensure a file is uploaded with the request
     if 'file' not in request.files:
@@ -213,9 +213,9 @@ def plot_avg_sentiment_per_person():
 
 @app.route('/whatsapp/message/length_over_time', methods=['POST'])
 def plot_message_length_over_time():
-    origin = request.headers.get('Origin') or request.headers.get('Referer')
-    if not origin or any(allowed_host in origin for allowed_host in ALLOWED_HOSTS):
-        abort(403)  # Forbidden
+    # origin = request.headers.get('Origin') or request.headers.get('Referer')
+    # if not origin or any(allowed_host in origin for allowed_host in ALLOWED_HOSTS):
+    #     abort(403)  # Forbidden
 
     # Ensure a file is uploaded with the request
     if 'file' not in request.files:
@@ -272,9 +272,9 @@ def plot_message_length_over_time():
 
 @app.route('/whatsapp/message/avg_sentiment_per_person/json', methods=['POST'])
 def avg_sentiment_per_person_json():
-    origin = request.headers.get('Origin') or request.headers.get('Referer')
-    if not origin or any(allowed_host in origin for allowed_host in ALLOWED_HOSTS):
-        abort(403)  # Forbidden
+    # origin = request.headers.get('Origin') or request.headers.get('Referer')
+    # if not origin or any(allowed_host in origin for allowed_host in ALLOWED_HOSTS):
+    #     abort(403)  # Forbidden
 
     # Ensure a file is uploaded with the request
     if 'file' not in request.files:
@@ -309,9 +309,9 @@ def avg_sentiment_per_person_json():
 
 @app.route('/whatsapp/message/sentiment_over_time', methods=['POST'])
 def plot_sentiment_over_time():
-    origin = request.headers.get('Origin') or request.headers.get('Referer')
-    if not origin or any(allowed_host in origin for allowed_host in ALLOWED_HOSTS):
-        abort(403)  # Forbidden
+    # origin = request.headers.get('Origin') or request.headers.get('Referer')
+    # if not origin or any(allowed_host in origin for allowed_host in ALLOWED_HOSTS):
+    #     abort(403)  # Forbidden
 
     # Ensure a file is uploaded with the request
     if 'file' not in request.files:
@@ -367,9 +367,9 @@ def plot_sentiment_over_time():
 
 @app.route('/whatsapp/message/peak_response_time', methods=['POST'])
 def analyze_peak_response_time():
-    origin = request.headers.get('Origin') or request.headers.get('Referer')
-    if not origin or any(allowed_host in origin for allowed_host in ALLOWED_HOSTS):
-        abort(403)  # Forbidden
+    # origin = request.headers.get('Origin') or request.headers.get('Referer')
+    # if not origin or any(allowed_host in origin for allowed_host in ALLOWED_HOSTS):
+    #     abort(403)  # Forbidden
 
     # Ensure a file is uploaded with the request
     if 'file' not in request.files:
@@ -431,9 +431,9 @@ def analyze_peak_response_time():
 
 @app.route('/whatsapp/message/peak_response_time/json', methods=['POST'])
 def analyze_peak_response_time_json():
-    origin = request.headers.get('Origin') or request.headers.get('Referer')
-    if not origin or any(allowed_host in origin for allowed_host in ALLOWED_HOSTS):
-        abort(403)  # Forbidden
+    # origin = request.headers.get('Origin') or request.headers.get('Referer')
+    # if not origin or any(allowed_host in origin for allowed_host in ALLOWED_HOSTS):
+    #     abort(403)  # Forbidden
 
     # Ensure a file is uploaded with the request
     if 'file' not in request.files:
@@ -483,9 +483,9 @@ def analyze_peak_response_time_json():
 
 @app.route('/whatsapp/message/activity_heatmap', methods=['POST'])
 def activity_heatmap():
-    origin = request.headers.get('Origin') or request.headers.get('Referer')
-    if not origin or any(allowed_host in origin for allowed_host in ALLOWED_HOSTS):
-        abort(403)  # Forbidden
+    # origin = request.headers.get('Origin') or request.headers.get('Referer')
+    # if not origin or any(allowed_host in origin for allowed_host in ALLOWED_HOSTS):
+    #     abort(403)  # Forbidden
 
     # Ensure a file is uploaded with the request
     if 'file' not in request.files:
@@ -536,9 +536,9 @@ def activity_heatmap():
 
 @app.route('/whatsapp/message/user_activity_over_time', methods=['POST'])
 def user_activity_over_time():
-    origin = request.headers.get('Origin') or request.headers.get('Referer')
-    if not origin or any(allowed_host in origin for allowed_host in ALLOWED_HOSTS):
-        abort(403)  # Forbidden
+    # origin = request.headers.get('Origin') or request.headers.get('Referer')
+    # if not origin or any(allowed_host in origin for allowed_host in ALLOWED_HOSTS):
+    #     abort(403)  # Forbidden
 
     # Ensure a file is uploaded with the request
     if 'file' not in request.files:
@@ -582,9 +582,9 @@ def user_activity_over_time():
 
 @app.route('/whatsapp/message/top_emojis_json/<int:top_n>', methods=['POST'])
 def get_top_emojis_json(top_n=10):
-    origin = request.headers.get('Origin') or request.headers.get('Referer')
-    if not origin or any(allowed_host in origin for allowed_host in ALLOWED_HOSTS):
-        abort(403)  # Forbidden
+    # origin = request.headers.get('Origin') or request.headers.get('Referer')
+    # if not origin or any(allowed_host in origin for allowed_host in ALLOWED_HOSTS):
+    #     abort(403)  # Forbidden
 
     # Ensure a file is uploaded with the request
     if 'file' not in request.files:
@@ -622,9 +622,9 @@ def get_top_emojis_json(top_n=10):
 # chiming in frequently.
 @app.route('/whatsapp/message/conversational_turns', methods=['POST'])
 def plot_conversational_turns():
-    origin = request.headers.get('Origin') or request.headers.get('Referer')
-    if not origin or any(allowed_host in origin for allowed_host in ALLOWED_HOSTS):
-        abort(403)  # Forbidden
+    # origin = request.headers.get('Origin') or request.headers.get('Referer')
+    # if not origin or any(allowed_host in origin for allowed_host in ALLOWED_HOSTS):
+    #     abort(403)  # Forbidden
 
     # Ensure a file is uploaded with the request
     if 'file' not in request.files:
@@ -673,9 +673,9 @@ def plot_conversational_turns():
 # WEIRD
 @app.route('/whatsapp/message/mention_analysis', methods=['POST'])
 def mention_analysis():
-    origin = request.headers.get('Origin') or request.headers.get('Referer')
-    if not origin or any(allowed_host in origin for allowed_host in ALLOWED_HOSTS):
-        abort(403)  # Forbidden
+    # origin = request.headers.get('Origin') or request.headers.get('Referer')
+    # if not origin or any(allowed_host in origin for allowed_host in ALLOWED_HOSTS):
+    #     abort(403)  # Forbidden
 
     # Ensure a file is uploaded with the request
     if 'file' not in request.files:
@@ -723,9 +723,9 @@ def mention_analysis():
 
 @app.route('/whatsapp/message/active_days', methods=['POST'])
 def plot_active_days():
-    origin = request.headers.get('Origin') or request.headers.get('Referer')
-    if not origin or any(allowed_host in origin for allowed_host in ALLOWED_HOSTS):
-        abort(403)  # Forbidden
+    # origin = request.headers.get('Origin') or request.headers.get('Referer')
+    # if not origin or any(allowed_host in origin for allowed_host in ALLOWED_HOSTS):
+    #     abort(403)  # Forbidden
 
     # Ensure a file is uploaded with the request
     if 'file' not in request.files:
@@ -770,9 +770,9 @@ def plot_active_days():
 
 @app.route('/whatsapp/message/topic_percentage', methods=['POST'])
 def topic_percentage():
-    origin = request.headers.get('Origin') or request.headers.get('Referer')
-    if not origin or any(allowed_host in origin for allowed_host in ALLOWED_HOSTS):
-        abort(403)  # Forbidden
+    # origin = request.headers.get('Origin') or request.headers.get('Referer')
+    # if not origin or any(allowed_host in origin for allowed_host in ALLOWED_HOSTS):
+    #     abort(403)  # Forbidden
 
     # Ensure a file is uploaded with the request
     if 'file' not in request.files:
@@ -818,9 +818,9 @@ def topic_percentage():
 
 @app.route('/whatsapp/message/topic_percentage/json', methods=['POST'])
 def topic_percentage_json():
-    origin = request.headers.get('Origin') or request.headers.get('Referer')
-    if not origin or any(allowed_host in origin for allowed_host in ALLOWED_HOSTS):
-        abort(403)  # Forbidden
+    # origin = request.headers.get('Origin') or request.headers.get('Referer')
+    # if not origin or any(allowed_host in origin for allowed_host in ALLOWED_HOSTS):
+    #     abort(403)  # Forbidden
 
     # Ensure a file is uploaded with the request
     if 'file' not in request.files:
@@ -866,9 +866,9 @@ def topic_percentage_json():
 
 @app.route('/whatsapp/message/wordfrequency/<int:top_words>', methods=['POST'])
 def plot_word_frequency(top_words=20):
-    origin = request.headers.get('Origin') or request.headers.get('Referer')
-    if not origin or any(allowed_host in origin for allowed_host in ALLOWED_HOSTS):
-        abort(403)  # Forbidden
+    # origin = request.headers.get('Origin') or request.headers.get('Referer')
+    # if not origin or any(allowed_host in origin for allowed_host in ALLOWED_HOSTS):
+    #     abort(403)  # Forbidden
 
     # Ensure a file is uploaded with the request
     if 'file' not in request.files:
@@ -921,9 +921,9 @@ def plot_word_frequency(top_words=20):
 
 @app.route('/whatsapp/message/wordcloud', methods=['POST'])
 def plot_cleaned_wordcloud():
-    origin = request.headers.get('Origin') or request.headers.get('Referer')
-    if not origin or any(allowed_host in origin for allowed_host in ALLOWED_HOSTS):
-        abort(403)  # Forbidden
+    # origin = request.headers.get('Origin') or request.headers.get('Referer')
+    # if not origin or any(allowed_host in origin for allowed_host in ALLOWED_HOSTS):
+    #     abort(403)  # Forbidden
 
     if 'file' not in request.files:
         return 'No file part', 400
@@ -980,9 +980,9 @@ def plot_cleaned_wordcloud():
 
 @app.route('/whatsapp/message/lenghiest/top/<int:top_contributors>', methods=['POST'])
 def plot_lengthiest_messages_pie_chart(top_contributors):
-    origin = request.headers.get('Origin') or request.headers.get('Referer')
-    if not origin or any(allowed_host in origin for allowed_host in ALLOWED_HOSTS):
-        abort(403)  # Forbidden
+    # origin = request.headers.get('Origin') or request.headers.get('Referer')
+    # if not origin or any(allowed_host in origin for allowed_host in ALLOWED_HOSTS):
+    #     abort(403)  # Forbidden
 
     # Ensure a file is uploaded with the request
     if 'file' not in request.files:
@@ -1036,9 +1036,9 @@ def plot_lengthiest_messages_pie_chart(top_contributors):
 
 @app.route('/whatsapp/message/sentiment/distribution', methods=['POST'])
 def plot_sentiment_distribution():
-    origin = request.headers.get('Origin') or request.headers.get('Referer')
-    if not origin or any(allowed_host in origin for allowed_host in ALLOWED_HOSTS):
-        abort(403)  # Forbidden
+    # origin = request.headers.get('Origin') or request.headers.get('Referer')
+    # if not origin or any(allowed_host in origin for allowed_host in ALLOWED_HOSTS):
+    #     abort(403)  # Forbidden
 
     # Ensure a file is uploaded with the request
     if 'file' not in request.files:
@@ -1088,9 +1088,9 @@ def plot_sentiment_distribution():
 
 @app.route('/whatsapp/message/heatmap', methods=['POST'])
 def plot_hourly_heatmap():
-    origin = request.headers.get('Origin') or request.headers.get('Referer')
-    if not origin or any(allowed_host in origin for allowed_host in ALLOWED_HOSTS):
-        abort(403)  # Forbidden
+    # origin = request.headers.get('Origin') or request.headers.get('Referer')
+    # if not origin or any(allowed_host in origin for allowed_host in ALLOWED_HOSTS):
+    #     abort(403)  # Forbidden
 
     # Read the file content
     if 'file' not in request.files:
@@ -1141,9 +1141,9 @@ def plot_hourly_heatmap():
 
 @app.route('/whatsapp/message/usercount', methods=['POST'])
 def user_message_count():
-    origin = request.headers.get('Origin') or request.headers.get('Referer')
-    if not origin or any(allowed_host in origin for allowed_host in ALLOWED_HOSTS):
-        abort(403)  # Forbidden
+    # origin = request.headers.get('Origin') or request.headers.get('Referer')
+    # if not origin or any(allowed_host in origin for allowed_host in ALLOWED_HOSTS):
+    #     abort(403)  # Forbidden
 
     # Initialize a dictionary to store the names and their message counts
     message_counts = defaultdict(int)
@@ -1201,10 +1201,10 @@ def user_message_count():
 
 @app.route('/whatsapp/message/activeusers/<int:num_users>', methods=['POST'])
 def most_active_users(num_users):
-    origin = request.headers.get('Origin') or request.headers.get('Referer')
-    if not origin or any(allowed_host in origin for allowed_host in ALLOWED_HOSTS):
-        abort(403)  # Forbidden
-        
+    # origin = request.headers.get('Origin') or request.headers.get('Referer')
+    # if not origin or any(allowed_host in origin for allowed_host in ALLOWED_HOSTS):
+    #     abort(403)  # Forbidden
+
     # Ensure a file is uploaded with the request
     if 'file' not in request.files:
         return 'No file part', 400
