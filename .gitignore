@@ -66,3 +66,6 @@ htmlcov/
 
 # Temporary files
 *.tmp
+
+# Shell scripts
+*.sh

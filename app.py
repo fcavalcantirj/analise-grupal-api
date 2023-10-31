@@ -4,7 +4,7 @@ import numpy as np
 import re
 from collections import defaultdict
 from collections import Counter
-from flask import Flask, request, send_file, jsonify
+from flask import Flask, request, send_file, jsonify, abort
 from wordcloud import WordCloud
 from datetime import datetime
 from LeIA import SentimentIntensityAnalyzer
@@ -24,6 +24,8 @@ import pyLDAvis.gensim_models as gensimvis
 import pyLDAvis
 matplotlib.use('Agg')  # Set the backend to 'Agg'
 import matplotlib.pyplot as plt
+
+ALLOWED_HOSTS = ["https://analisegrupal.com.br", "https://api.analisegrupal.com.br"]
 
 app = Flask(__name__)
 CORS(app)
@@ -93,6 +95,14 @@ def build_lda_model(texts, num_topics=5):
     corpus = [dictionary.doc2bow(text) for text in texts]
     lda_model = LdaModel(corpus, num_topics=num_topics, id2word=dictionary, passes=15)
     return lda_model, corpus, dictionary
+
+
+@app.route('/')
+def home():
+    origin = request.headers.get('Origin') or request.headers.get('Referer')
+    if not origin or any(allowed_host in origin for allowed_host in ALLOWED_HOSTS):
+        abort(403)  # Forbidden
+    return jsonify({"message": "Hello, allowed host!"})
 
 
 @app.route('/healthcheck', methods=['GET'])

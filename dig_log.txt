@@ -1,0 +1,38 @@
+
+; <<>> DiG 9.10.6 <<>> analisegrupal.com.br
+;; global options: +cmd
+;; Got answer:
+;; ->>HEADER<<- opcode: QUERY, status: NOERROR, id: 45724
+;; flags: qr rd ra; QUERY: 1, ANSWER: 2, AUTHORITY: 2, ADDITIONAL: 13
+
+;; OPT PSEUDOSECTION:
+; EDNS: version: 0, flags:; udp: 4096
+;; QUESTION SECTION:
+;analisegrupal.com.br.		IN	A
+
+;; ANSWER SECTION:
+analisegrupal.com.br.	300	IN	A	104.21.12.207
+analisegrupal.com.br.	300	IN	A	172.67.132.103
+
+;; AUTHORITY SECTION:
+analisegrupal.com.br.	3600	IN	NS	damiete.ns.cloudflare.com.
+analisegrupal.com.br.	3600	IN	NS	magnolia.ns.cloudflare.com.
+
+;; ADDITIONAL SECTION:
+damiete.ns.cloudflare.com. 158374 IN	A	108.162.195.32
+damiete.ns.cloudflare.com. 158374 IN	A	162.159.44.32
+damiete.ns.cloudflare.com. 158374 IN	A	172.64.35.32
+magnolia.ns.cloudflare.com. 158309 IN	A	108.162.194.214
+magnolia.ns.cloudflare.com. 158309 IN	A	162.159.38.214
+magnolia.ns.cloudflare.com. 158309 IN	A	172.64.34.214
+damiete.ns.cloudflare.com. 158374 IN	AAAA	2a06:98c1:50::ac40:2320
+damiete.ns.cloudflare.com. 158374 IN	AAAA	2606:4700:58::a29f:2c20
+damiete.ns.cloudflare.com. 158374 IN	AAAA	2803:f800:50::6ca2:c320
+magnolia.ns.cloudflare.com. 158309 IN	AAAA	2606:4700:50::a29f:26d6
+magnolia.ns.cloudflare.com. 158309 IN	AAAA	2803:f800:50::6ca2:c2d6
+magnolia.ns.cloudflare.com. 158309 IN	AAAA	2a06:98c1:50::ac40:22d6
+
+;; Query time: 43 msec
+;; SERVER: 2804:14d:1:0:181:213:132:2#53(2804:14d:1:0:181:213:132:2)
+;; WHEN: Tue Oct 31 00:46:38 -03 2023
+;; MSG SIZE  rcvd: 407
