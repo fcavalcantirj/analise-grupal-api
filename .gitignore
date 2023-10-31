@@ -69,3 +69,7 @@ htmlcov/
 
 # Shell scripts
 *.sh
+
+# test files
+test.py
+test*.py

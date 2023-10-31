@@ -155,6 +155,64 @@ def extract_emojis(text):
         "]+", flags=re.UNICODE)
     return emoji_pattern.findall(text)
 
+def determine_patterns(first_line):
+    first_line = first_line.replace('"', "'")
+
+    if "[" in first_line and "]" in first_line:
+        date_pattern = r"\[.*?\]"
+        message_pattern = r"(.*?):\s*(.*)"
+    elif "," in first_line:
+        date_pattern = r"\d{1,2}/\d{1,2}/\d{2,4}, \d{1,2}:\d{1,2}\s[APMapm]{2}"
+        message_pattern = r"- (.*?): (.*)"
+    else:
+        raise ValueError("Unsupported date format in the provided content.")
+
+    return date_pattern, message_pattern
+
+def extract_senders_messages_from_content(content):
+    # Determine patterns based on the first line
+    date_pattern, message_pattern = determine_patterns(content[0])
+
+    # Debug info
+    print("Date pattern:", date_pattern)
+    print("Message pattern:", message_pattern)
+    
+    # Regular expression to extract timestamp, sender, and messages
+    line_pattern = re.compile(rf"{date_pattern} {message_pattern}")
+    
+    extracted_data = []
+    for line in content:
+        if match := line_pattern.match(line):
+            sender, message = match.group(1), match.group(2)
+            extracted_data.append((sender, message))
+
+    return extracted_data
+
+def extract_timestamps_messages_from_content(content):
+    # Replace double quotes with single quotes in the first line
+    first_line = content[0].replace('"', "'")
+    
+    # Determine patterns based on the modified first line
+    date_pattern, message_pattern = determine_patterns(first_line)
+
+    # Debug info
+    print("Date pattern:", date_pattern)
+    print("Message pattern:", message_pattern)
+    
+    # Regular expression to extract timestamp, sender, and messages
+    line_pattern = re.compile(rf"({date_pattern}) {message_pattern}")
+    
+    extracted_data = []
+    for line in content:
+        # Replace double quotes with single quotes for each line
+        line = line.replace('"', "'")
+        if match := line_pattern.match(line):
+            timestamp, message = match.group(1), match.group(3)  # Adjusted the group numbers
+            extracted_data.append((timestamp, message))
+
+    return extracted_data
+
+
 @app.route('/whatsapp/message/avg_sentiment_per_person', methods=['POST'])
 def plot_avg_sentiment_per_person():
     # origin = request.headers.get('Origin') or request.headers.get('Referer')
@@ -172,10 +230,14 @@ def plot_avg_sentiment_per_person():
     content = file.read().decode('utf-8').splitlines()
 
     # print(content[:5])
-    
-    # Regular expression to extract timestamp, sender and messages
-    message_pattern = re.compile(r"\d{1,2}/\d{1,2}/\d{2,4}, \d{1,2}:\d{1,2}\s[APMapm]{2} - (.*?): (.*)")
-    extracted_data = [(match.group(1), match.group(2)) for line in content if (match := message_pattern.search(line))]
+
+    extracted_data = extract_senders_messages_from_content(content)
+
+    # print(extracted_data[:1])
+
+    if len(extracted_data) == 0:  # Check if the DataFrame is empty
+        print("NO DATA")
+        return "No data available for plotting - avg_sentiment_per_person.empty", 400
 
     senders, messages = zip(*extracted_data)
 
@@ -229,21 +291,34 @@ def plot_message_length_over_time():
 
     # print(content[:5])
     
-    # Regular expression to extract timestamp and messages
-    message_pattern = re.compile(r"(\d{1,2}/\d{1,2}/\d{2,4}, \d{1,2}:\d{1,2}\s[APMapm]{2}) - .*?: (.*)")
-    extracted_data = [(match.group(1), match.group(2)) for line in content if (match := message_pattern.search(line))]
+    extracted_data = extract_timestamps_messages_from_content(content)
 
-    # print(extracted_data[:5])
+    # print(extracted_data[:1])
+
+    if len(extracted_data) == 0:  # Check if the DataFrame is empty
+        print("NO DATA")
+        return "No data available for plotting - avg_sentiment_per_person.empty", 400
 
     timestamps, messages = zip(*extracted_data)
 
     # Compute message lengths
     message_lengths = [len(msg) for msg in messages]
 
+    date_pattern, message_pattern = determine_patterns(content[0].replace('"', "'"))
+
+    if date_pattern == r"\d{1,2}/\d{1,2}/\d{2,4}, \d{1,2}:\d{1,2}\s[APMapm]{2}":
+        datetime_format = '%m/%d/%y, %I:%M\u202f%p'
+    elif date_pattern == r"\[.*?\]":
+        datetime_format = '[%d/%m/%Y, %H:%M:%S]'
+    else:
+        datetime_format = None
+
+    print(datetime_format)
+
     df = pd.DataFrame({
-    'timestamp': pd.to_datetime(timestamps, errors='coerce', format='%m/%d/%y, %I:%M\u202f%p'),
-    'message_length': [len(msg) for msg in messages]
-}).dropna()
+        'timestamp': pd.to_datetime(timestamps, errors='coerce', format=datetime_format),
+        'message_length': [len(msg) for msg in messages]
+    }).dropna()
 
     # print(df)
 
@@ -285,10 +360,12 @@ def avg_sentiment_per_person_json():
 
     # Read the content of the uploaded file
     content = file.read().decode('utf-8').splitlines()
-    
-    # Regular expression to extract timestamp, sender and messages
-    message_pattern = re.compile(r"\d{1,2}/\d{1,2}/\d{2,4}, \d{1,2}:\d{1,2}\s[APMapm]{2} - (.*?): (.*)")
-    extracted_data = [(match.group(1), match.group(2)) for line in content if (match := message_pattern.search(line))]
+
+    extracted_data = extract_senders_messages_from_content(content)
+
+    if len(extracted_data) == 0:  # Check if the DataFrame is empty
+        print("NO DATA")
+        return "No data available for plotting - avg_sentiment_per_person.empty", 400
 
     senders, messages = zip(*extracted_data)
 
@@ -322,10 +399,15 @@ def plot_sentiment_over_time():
 
     # Read the content of the uploaded file
     content = file.read().decode('utf-8').splitlines()
+
+    # print(content[:5])
     
-    # Regular expression to extract timestamp and messages
-    message_pattern = re.compile(r"(\d{1,2}/\d{1,2}/\d{2,4}, \d{1,2}:\d{1,2}\s[APMapm]{2}) - .*?: (.*)")
-    extracted_data = [(match.group(1), match.group(2)) for line in content if (match := message_pattern.search(line))]
+    extracted_data = extract_timestamps_messages_from_content(content)
+
+    # print(extracted_data[:1])
+
+    if len(extracted_data) == 0:  # Check if the DataFrame is empty
+        return "No data available for plotting", 400
 
     timestamps, messages = zip(*extracted_data)
 
@@ -337,8 +419,19 @@ def plot_sentiment_over_time():
 
     print(f"Sentiments count: {len(sentiments)}")
 
+    date_pattern, message_pattern = determine_patterns(content[0].replace('"', "'"))
+
+    if date_pattern == r"\d{1,2}/\d{1,2}/\d{2,4}, \d{1,2}:\d{1,2}\s[APMapm]{2}":
+        datetime_format = '%m/%d/%y, %I:%M\u202f%p'
+    elif date_pattern == r"\[.*?\]":
+        datetime_format = '[%d/%m/%Y, %H:%M:%S]'
+    else:
+        datetime_format = None
+
+    print(datetime_format)
+
     df = pd.DataFrame({
-        'timestamp': pd.to_datetime(timestamps, errors='coerce', format='%m/%d/%y, %I:%M %p'),
+        'timestamp': pd.to_datetime(timestamps, errors='coerce', format=datetime_format),
         'sentiment': sentiments
     }).dropna()
 
@@ -497,12 +590,30 @@ def activity_heatmap():
     # Read the content of the uploaded file
     content = file.read().decode('utf-8').splitlines()
 
-    # Define a regex pattern to extract date and time details
-    date_time_pattern = re.compile(r"(\d{1,2}/\d{1,2}/\d{2,4}), (\d{1,2}:\d{1,2})\s[APMapm]{2}")
+    date_pattern, message_pattern = determine_patterns(content[0].replace('"', "'"))
+
+    if date_pattern == r"\d{1,2}/\d{1,2}/\d{2,4}, \d{1,2}:\d{1,2}\s[APMapm]{2}":
+        date_time_pattern = re.compile(r"(\d{1,2}/\d{1,2}/\d{2,4}), (\d{1,2}:\d{1,2})\s[APMapm]{2}")
+    elif date_pattern == r"\[.*?\]":
+        date_time_pattern = re.compile(r"\[(\d{2}/\d{2}/\d{4}), (\d{2}:\d{2}:\d{2})\]")
+    else:
+        return "No data available for plotting", 400
 
     # Extract date and time details
-    date_times = [date_time_pattern.search(line).groups() for line in content if date_time_pattern.search(line)]
+    date_times = []
+    for line in content:
+        match = date_time_pattern.search(line)
+        if match:
+            date_times.append(match.groups())
+
+    # print(date_times[:0])
+    # print(len(date_times))
+
+    if len(date_times[0]) == 0:  # Check if the DataFrame is empty
+        return "No data available for plotting", 400
+
     dates, times = zip(*date_times)
+
 
     # Convert to pandas datetime format for easier manipulation
     date_times = pd.to_datetime([' '.join(item) for item in zip(dates, times)], errors='coerce')
@@ -550,11 +661,27 @@ def user_activity_over_time():
     # Read the content of the uploaded file
     content = file.read().decode('utf-8').splitlines()
 
-    # Define a regex pattern to extract the date and participant names
-    message_pattern = re.compile(r"(\d{1,2}/\d{1,2}/\d{2,4}), \d{1,2}:\d{1,2}\s[APMapm]{2} - (.*?): .*")
-    
+    date_pattern, message_pattern = determine_patterns(content[0].replace('"', "'"))
+
+    # Adjust the regex pattern based on the determined patterns
+    if date_pattern == r"\d{1,2}/\d{1,2}/\d{2,4}, \d{1,2}:\d{1,2}\s[APMapm]{2}":
+        activity_pattern = re.compile(rf"({date_pattern}) - (.*?): .*")
+    elif date_pattern == r"\[.*?\]":
+        activity_pattern = re.compile(rf"\[(\d{1,2}/\d{1,2}/\d{2,4}, \d{1,2}:\d{1,2}:\d{1,2})\] (.*?): .*")
+    else:
+        return "No data available for plotting", 400
+
     # Extract dates and names
-    dates_names = [(match.group(1), match.group(2)) for line in content if (match := message_pattern.search(line))]
+    dates_names = []
+    for line in content:
+        match = activity_pattern.search(line)
+        if match:
+            dates_names.append((match.group(1), match.group(2)))
+
+    if len(dates_names) == 0:  # Check if the DataFrame is empty
+        return "No data available for plotting", 400
+
+    print(dates_names[:1])
     
     # Convert to DataFrame
     df = pd.DataFrame(dates_names, columns=['Date', 'Name'])
@@ -579,6 +706,7 @@ def user_activity_over_time():
 
     # Send the saved image file as the response
     return send_file(temp_file.name, mimetype='image/png')
+
 
 @app.route('/whatsapp/message/top_emojis_json/<int:top_n>', methods=['POST'])
 def get_top_emojis_json(top_n=10):
@@ -1250,4 +1378,4 @@ def most_active_users(num_users):
 
 
 if __name__ == '__main__':
-    app.run(debug=False, host='0.0.0.0', port=5000)
+    app.run(debug=True, host='0.0.0.0', port=5000)
