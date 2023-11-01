@@ -72,7 +72,7 @@ soccer_keywords = {
 }
 
 sex_pornography_keywords = {
-    "brotheragem", "holandês", "holandes", "puta", "gostosa", "safada", "linda", "pornografia", "nu", "nudez", "sensual", "erotismo", 
+    "brotheragem", "holandês", "holandes", "puta", "gostosa", "safada", "pornografia", "nu", "nudez", "sensual", "erotismo", 
     "pornô", "fetiche", "prostituição", "adulto", "orgasmo", "lubrificante", 
     "preservativo", "camisinha", "vibrador", "strip", "lingerie", "sedução"
 }
@@ -80,7 +80,7 @@ sex_pornography_keywords = {
 remove_words = [
     "omitted", "Media", "Mas", "mas", "q", "O", "E", "mais", "omitted>", "<Media", "media", "Media", "http", 
     "https", "figurinha omitida", "imagem ocultada", "oculto>", "mídia", "[]", "<Aruivo", "apagada", "Mensagem",
-    "<", "editada>"
+    "<", "editada>", ">"
 ]
 
 nltk.download('stopwords')
@@ -284,7 +284,7 @@ def plot_avg_sentiment_per_person():
     _content = file.read().decode('utf-8').splitlines()
     content = preprocess_content(_content, remove_words)
 
-    print(content[:5])
+    # print(content[:5])
     
     # Regular expression to extract timestamp, sender and messages
     message_pattern = re.compile(r"\d{1,2}/\d{1,2}/\d{2,4}, \d{1,2}:\d{1,2}\s[APMapm]{2} - (.*?): (.*)")
@@ -306,10 +306,23 @@ def plot_avg_sentiment_per_person():
     if len(avg_sentiments) == 0:  # Check if the DataFrame is empty
         return "No data available for plotting - avg_sentiments.empty", 400
 
+    N = 20  # Number of senders with the highest sentiment scores to display
+    M = 20  # Number of senders with the lowest sentiment scores to display
+
+    # Sort the dictionary by average sentiment
+    sorted_avg_sentiments = dict(sorted(avg_sentiments.items(), key=lambda item: item[1]))
+
+    # Extract the top N and bottom M senders
+    top_senders = dict(list(sorted_avg_sentiments.items())[-N:])
+    bottom_senders = dict(list(sorted_avg_sentiments.items())[:M])
+
+    # Merge the two dictionaries
+    combined_senders = {**bottom_senders, **top_senders}
+
     # Plotting
     plt.figure(figsize=(12, 8))
-    plt.bar(avg_sentiments.keys(), avg_sentiments.values(), color='dodgerblue')
-    plt.title("Average Sentiment Per Person")
+    plt.bar(combined_senders.keys(), combined_senders.values(), color='dodgerblue')
+    plt.title("Top and Bottom Senders by Average Sentiment")
     plt.ylabel("Average Sentiment Score")
     plt.xlabel("Sender")
     plt.xticks(rotation=45, ha='right')
@@ -805,16 +818,26 @@ def plot_conversational_turns():
             turn_counts[sender] += 1
         previous_sender = sender
 
-    # Prepare data for plotting
-    sorted_turn_counts = sorted(turn_counts.items(), key=lambda x: x[1], reverse=True)
-    names, counts = zip(*sorted_turn_counts)
+    N = 20  # Number of senders with the most conversational turns to display
+    M = 5  # Number of senders with the fewest conversational turns to display
+
+    # Sort the dictionary by number of turns
+    sorted_turn_counts = sorted(turn_counts.items(), key=lambda item: item[1])
+
+    # Extract the top N and bottom M senders
+    top_senders = dict(list(sorted_turn_counts)[-N:])
+    bottom_senders = dict(list(sorted_turn_counts)[:M])
+
+    # Merge the two dictionaries
+    combined_senders = {**bottom_senders, **top_senders}
 
     # Plotting the data
     plt.figure(figsize=(12, 8))
+    names, counts = zip(*combined_senders.items())
     plt.barh(names, counts, color='mediumseagreen')
     plt.xlabel('Number of Turns')
     plt.ylabel('Names')
-    plt.title("Conversational Turns Analysis")
+    plt.title("Top and Bottom Senders by Conversational Turns")
     plt.gca().invert_yaxis()
 
     # Save the plot to a temporary file
@@ -1350,34 +1373,36 @@ def user_message_count():
                 name = match.group(1)
                 message_counts[name] += 1
 
-        # Convert the dictionary to a sorted list of tuples
-        sorted_message_counts = sorted(message_counts.items(), key=lambda x: x[1], reverse=True)
+        # Sort the dictionary by message count
+        sorted_message_counts = sorted(message_counts.items(), key=lambda item: item[1])
 
-        # Filter out names with message counts below a certain threshold
-        threshold = 100
-        filtered_message_counts = [(name, count) for name, count in sorted_message_counts if count > threshold]
+        N = 20  # Number of users with the most messages to display
+        M = 5  # Number of users with the fewest messages to display
 
-        # Data for the filtered pie chart
-        filtered_names = [item[0] for item in filtered_message_counts]
-        filtered_message_count_values = [item[1] for item in filtered_message_counts]
+        # Extract the top N and bottom M users
+        top_users = dict(list(sorted_message_counts)[-N:])
+        bottom_users = dict(list(sorted_message_counts)[:M])
 
-        # Plot the filtered pie chart
+        # Merge the two dictionaries
+        combined_users = {**bottom_users, **top_users}
+
+        # Plotting the data
         plt.figure(figsize=(12, 8))
-        plt.pie(filtered_message_count_values, labels=filtered_names, autopct='%1.1f%%', startangle=90, colors=plt.cm.Paired.colors)
-        plt.title("Message Distribution by Users (Filtered)")
-        plt.axis('equal')  # Equal aspect ratio ensures that pie is drawn as a circle.
-        # plt.show()
+        names, counts = zip(*combined_users.items())
+        plt.barh(names, counts, color='mediumseagreen')
+        plt.xlabel('Number of Messages')
+        plt.ylabel('Names')
+        plt.title("Top and Bottom Users by Message Count")
+        plt.gca().invert_yaxis()
 
-        # Convert the sorted_message_counts to a DataFrame for tabular representation
-        df_message_counts = pd.DataFrame(sorted_message_counts, columns=["Name", "Message Count"])
-        # print(df_message_counts)
-
+        # Save the plot to a temporary file
         temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".png")
         plt.savefig(temp_file.name, format='png')
-        plt.close()  # Close the plot
+        plt.close()
 
-        # Return the saved image file as the response
+        # Send the saved image file as the response
         return send_file(temp_file.name, mimetype='image/png')
+
 
 @app.route('/whatsapp/message/activeusers/<int:num_users>', methods=['POST'])
 def most_active_users(num_users):
