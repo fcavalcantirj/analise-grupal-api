@@ -77,6 +77,12 @@ sex_pornography_keywords = {
     "preservativo", "camisinha", "vibrador", "strip", "lingerie", "sedução"
 }
 
+remove_words = [
+    "omitted", "Media", "Mas", "mas", "q", "O", "E", "mais", "omitted>", "<Media", "media", "Media", "http", 
+    "https", "figurinha omitida", "imagem ocultada", "oculto>", "mídia", "[]", "<Aruivo", "apagada", "Mensagem",
+    "<", "editada>"
+]
+
 nltk.download('stopwords')
 nltk.download('wordnet')
 
@@ -95,6 +101,112 @@ def build_lda_model(texts, num_topics=5):
     corpus = [dictionary.doc2bow(text) for text in texts]
     lda_model = LdaModel(corpus, num_topics=num_topics, id2word=dictionary, passes=15)
     return lda_model, corpus, dictionary
+
+
+def determine_patterns(first_line):
+    if "[" in first_line and "]" in first_line:
+        date_pattern = r"\[.*?\]"
+    elif "," in first_line:
+        date_pattern = r"\d{1,2}/\d{1,2}/\d{2,4}, \d{1,2}:\d{1,2}\s[APMapm]{2}"
+    elif " " in first_line:
+        date_pattern = r"\d{1,2}/\d{1,2}/\d{2,4} \d{1,2}:\d{1,2}:\d{1,2}"
+    else:
+        return None, None
+    
+    message_pattern = r"- (.*?): (.*)"
+    return date_pattern, message_pattern
+
+def preprocess_content_old(content, words_to_remove=[]):
+    processed_content = []
+    for line in content:
+        # Replace double quotes with single quotes
+        line = line.replace('"', "'")
+        
+        date_pattern, _ = determine_patterns(line)
+        
+        # If date_pattern is None, skip the line
+        if not date_pattern:
+            continue
+
+        # Pattern to match the format like: [09/05/2014, 23:50:59]
+        if date_pattern == r"\[.*?\]":
+            pattern1 = re.compile(r"\[(\d{1,2}/\d{1,2}/\d{2,4}), (\d{1,2}:\d{1,2}:\d{1,2})\] (.*?):")
+            line = pattern1.sub(r"\1, \2 - \3:", line)
+
+            # Pattern to match the format like: [21/04/2022 23:54:40]
+            pattern3 = re.compile(r"\[(\d{1,2}/\d{1,2}/\d{2,4}) (\d{1,2}:\d{1,2}:\d{1,2})\] (.*?):")
+            line = pattern3.sub(lambda m: f"{m.group(1)}, {m.group(2)[:-3]} - {m.group(3)}:", line)
+
+        # Remove specified words
+        for word in words_to_remove:
+            line = line.replace(word, "")
+
+        # Add the processed line to the output list
+        processed_content.append(line)
+        
+    return processed_content
+
+def format_datetime(date, time):
+    # Split the date into day, month, and year
+    day, month, year = map(int, date.split('/'))
+    
+    # Ensure the year is in two-digit format
+    year = year % 100
+    
+    # Extract hour, minute, and possibly second from time
+    time_parts = time.split(':')
+    hour, minute = map(int, time_parts[:2])
+    
+    # Extract AM or PM if present
+    am_pm = time_parts[2].split()[1] if len(time_parts) > 2 and ('AM' in time_parts[2] or 'PM' in time_parts[2]) else None
+    if not am_pm and '\u202F' in time:  # Special case with the narrow no-break space
+        am_pm = time_parts[2]
+    
+    # If AM or PM is not provided, make an assumption based on the hour
+    if not am_pm:
+        am_pm = "AM" if hour < 12 else "PM"
+    
+    # Format date and time
+    formatted_date = f"{day:02}/{month:02}/{year:02}"
+    formatted_time = f"{hour:02}:{minute:02} {am_pm}"
+    
+    return f"{formatted_date}, {formatted_time}"
+
+def preprocess_content(content, words_to_remove=['Vic']):
+    extracted_content = []
+
+    # Define patterns to handle various date-time and message structures
+    patterns = [
+        re.compile(r'\[(\d{1,2}/\d{1,2}/\d{2,4}), (\d{1,2}:\d{1,2}(:\d{1,2})?)\] (.*?): (.*)', re.IGNORECASE),
+        re.compile(r'(\d{1,2}/\d{1,2}/\d{2,4}), (\d{1,2}:\d{1,2}(:\d{1,2})?) ?(AM|PM)? - (.*?): (.*)', re.IGNORECASE),
+        re.compile(r'(\d{1,2}/\d{1,2}/\d{2,4}), (\d{1,2}:\d{1,2})\u202F(AM|PM) - (.*?): (.*)', re.IGNORECASE),
+        re.compile(r'(\d{1,2}/\d{1,2}/\d{2,4}) (\d{1,2}:\d{1,2}:\d{1,2}) - (.*?): \u200e?(.*)', re.IGNORECASE),
+        re.compile(r'(\d{1,2}/\d{1,2}/\d{2,4}) (\d{1,2}:\d{1,2}) - (.*?): \u200e?(.*)', re.IGNORECASE),
+        re.compile(r'\[(\d{1,2}/\d{1,2}/\d{2,4}) (\d{1,2}:\d{1,2}:\d{1,2})\] (.*?): \u200e?(.*)', re.IGNORECASE)
+    ]
+    
+    for line in content:
+        line = line.replace('"', "'")
+        for pattern in patterns:
+            match = pattern.search(line)
+            if match:
+                date, time = match.groups()[0], match.groups()[1]
+                
+                # Format the datetime to ensure it's in the desired format
+                formatted_datetime = format_datetime(date, time)
+                
+                person = match.groups()[-2]
+                message_content = match.groups()[-1]
+
+                # extracted_content.append((formatted_datetime, person.strip(), message_content.strip()))
+                _str = formatted_datetime + ' - ' + person.strip() + ": " + message_content.strip()
+                # print(_str)
+                for word in words_to_remove:
+                    _str = _str.replace(word, "")
+                extracted_content.append(_str)
+                break
+
+    return extracted_content
 
 
 @app.route('/')
@@ -169,9 +281,10 @@ def plot_avg_sentiment_per_person():
         return 'No selected file', 400
 
     # Read the content of the uploaded file
-    content = file.read().decode('utf-8').splitlines()
+    _content = file.read().decode('utf-8').splitlines()
+    content = preprocess_content(_content, remove_words)
 
-    # print(content[:5])
+    print(content[:5])
     
     # Regular expression to extract timestamp, sender and messages
     message_pattern = re.compile(r"\d{1,2}/\d{1,2}/\d{2,4}, \d{1,2}:\d{1,2}\s[APMapm]{2} - (.*?): (.*)")
@@ -225,7 +338,8 @@ def plot_message_length_over_time():
         return 'No selected file', 400
 
     # Read the content of the uploaded file
-    content = file.read().decode('utf-8').splitlines()
+    _content = file.read().decode('utf-8').splitlines()
+    content = preprocess_content(_content, remove_words)
 
     # print(content[:5])
     
@@ -284,7 +398,8 @@ def avg_sentiment_per_person_json():
         return 'No selected file', 400
 
     # Read the content of the uploaded file
-    content = file.read().decode('utf-8').splitlines()
+    _content = file.read().decode('utf-8').splitlines()
+    content = preprocess_content(_content, remove_words)
     
     # Regular expression to extract timestamp, sender and messages
     message_pattern = re.compile(r"\d{1,2}/\d{1,2}/\d{2,4}, \d{1,2}:\d{1,2}\s[APMapm]{2} - (.*?): (.*)")
@@ -321,7 +436,8 @@ def plot_sentiment_over_time():
         return 'No selected file', 400
 
     # Read the content of the uploaded file
-    content = file.read().decode('utf-8').splitlines()
+    _content = file.read().decode('utf-8').splitlines()
+    content = preprocess_content(_content, remove_words)
     
     # Regular expression to extract timestamp and messages
     message_pattern = re.compile(r"(\d{1,2}/\d{1,2}/\d{2,4}, \d{1,2}:\d{1,2}\s[APMapm]{2}) - .*?: (.*)")
@@ -379,23 +495,58 @@ def analyze_peak_response_time():
         return 'No selected file', 400
 
     # Read the content of the uploaded file
-    content = file.read().decode('utf-8').splitlines()
+    _content = file.read().decode('utf-8').splitlines()
+    content = preprocess_content(_content, remove_words)
 
-    # Define a regex pattern to extract the timestamp and sender's name
-    timestamp_pattern = re.compile(r"(\d{1,2}/\d{1,2}/\d{2,4}, \d{1,2}:\d{1,2}\u202f[APMapm]{2}) - (.*?):")
+    print(content[:10])  # Print the first 10 lines
+
+    # Update the regex pattern
+    timestamp_pattern = re.compile(r"(\d{1,2}/\d{1,2}/\d{2,4}, \d{1,2}:\d{1,2}(?:\s?[APMapm]{2})?) - (.*?):")
 
     # Lists to store the extracted timestamps and senders
     timestamps = []
     senders = []
 
-    # Iterate over each line to extract timestamps and sender names
+    # Function to correct invalid time format
+    def correct_time_format(timestamp_str):
+        time_part = timestamp_str.split(", ")[1].split(" ")[0]
+        hour, minute = map(int, time_part.split(":"))
+        
+        if "AM" in timestamp_str or "PM" in timestamp_str:
+            # Adjust for midnight or noon
+            if hour == 0:
+                timestamp_str = timestamp_str.replace("00:", "12:")
+            # Remove PM/AM for 24-hour format
+            if hour >= 12:
+                timestamp_str = timestamp_str.replace(" PM", "")
+            else:
+                timestamp_str = timestamp_str.replace(" AM", "")
+        return timestamp_str
+
+    # Use the modified function in the previous code
     for line in content:
         match = timestamp_pattern.search(line)
         if match:
             timestamp_str, sender = match.groups()
-            timestamp = datetime.strptime(timestamp_str, "%m/%d/%y, %I:%M\u202f%p")
+            timestamp_str = correct_time_format(timestamp_str)
+            # Adjust datetime parsing based on whether AM/PM exists in the string
+            if "AM" in timestamp_str or "PM" in timestamp_str:
+                timestamp_format = "%d/%m/%y, %I:%M %p"
+            else:
+                timestamp_format = "%d/%m/%y, %H:%M"
+            try:
+                timestamp = datetime.strptime(timestamp_str, timestamp_format)
+            except ValueError:
+                timestamp_format = "%m/%d/%y, %H:%M"  # fallback to month/day/year
+                timestamp = datetime.strptime(timestamp_str, timestamp_format)
             timestamps.append(timestamp)
             senders.append(sender)
+
+
+
+
+    print("timestamps: ", str(len(timestamps)))
+    print("senders: ", str(len(senders)))
 
     # Create a DataFrame from the extracted data
     df = pd.DataFrame({'Timestamp': timestamps, 'Sender': senders})
@@ -443,7 +594,8 @@ def analyze_peak_response_time_json():
         return 'No selected file', 400
 
     # Read the content of the uploaded file
-    content = file.read().decode('utf-8').splitlines()
+    _content = file.read().decode('utf-8').splitlines()
+    content = preprocess_content(_content, remove_words)
 
     # Define a regex pattern to extract the timestamp and sender's name
     timestamp_pattern = re.compile(r"(\d{1,2}/\d{1,2}/\d{2,4}, \d{1,2}:\d{1,2}\u202f[APMapm]{2}) - (.*?):")
@@ -495,7 +647,8 @@ def activity_heatmap():
         return 'No selected file', 400
 
     # Read the content of the uploaded file
-    content = file.read().decode('utf-8').splitlines()
+    _content = file.read().decode('utf-8').splitlines()
+    content = preprocess_content(_content, remove_words)
 
     # Define a regex pattern to extract date and time details
     date_time_pattern = re.compile(r"(\d{1,2}/\d{1,2}/\d{2,4}), (\d{1,2}:\d{1,2})\s[APMapm]{2}")
@@ -548,7 +701,8 @@ def user_activity_over_time():
         return 'No selected file', 400
 
     # Read the content of the uploaded file
-    content = file.read().decode('utf-8').splitlines()
+    _content = file.read().decode('utf-8').splitlines()
+    content = preprocess_content(_content, remove_words)
 
     # Define a regex pattern to extract the date and participant names
     message_pattern = re.compile(r"(\d{1,2}/\d{1,2}/\d{2,4}), \d{1,2}:\d{1,2}\s[APMapm]{2} - (.*?): .*")
@@ -594,7 +748,8 @@ def get_top_emojis_json(top_n=10):
         return 'No selected file', 400
 
     # Read the content of the uploaded file
-    content = file.read().decode('utf-8').splitlines()
+    _content = file.read().decode('utf-8').splitlines()
+    content = preprocess_content(_content, remove_words)
 
     # Define a regex pattern to extract the message content
     message_pattern = re.compile(r"\d{1,2}/\d{1,2}/\d{2,4}, \d{1,2}:\d{1,2}\s[APMapm]{2} - .*?: (.*)")
@@ -634,7 +789,8 @@ def plot_conversational_turns():
         return 'No selected file', 400
 
     # Read the content of the uploaded file
-    content = file.read().decode('utf-8').splitlines()
+    _content = file.read().decode('utf-8').splitlines()
+    content = preprocess_content(_content, remove_words)
 
     # Define a regex pattern to extract the sender of each message
     sender_pattern = re.compile(r"\d{1,2}/\d{1,2}/\d{2,4}, \d{1,2}:\d{1,2}\s[APMapm]{2} - (.*?):")
@@ -685,7 +841,8 @@ def mention_analysis():
         return 'No selected file', 400
 
     # Read the content of the uploaded file
-    content = file.read().decode('utf-8').splitlines()
+    _content = file.read().decode('utf-8').splitlines()
+    content = preprocess_content(_content, remove_words)
     
     # Regular expression to extract sender and messages
     message_pattern = re.compile(r"\d{1,2}/\d{1,2}/\d{2,4}, \d{1,2}:\d{1,2}\s[APMapm]{2} - (.*?): (.*)")
@@ -735,7 +892,8 @@ def plot_active_days():
         return 'No selected file', 400
 
     # Read the content of the uploaded file
-    content = file.read().decode('utf-8').splitlines()
+    _content = file.read().decode('utf-8').splitlines()
+    content = preprocess_content(_content, remove_words)
 
     # Define a regex pattern to extract the date of each message
     date_pattern = re.compile(r"(\d{1,2}/\d{1,2}/\d{2,4}), \d{1,2}:\d{1,2}\s[APMapm]{2} - .*?:")
@@ -782,7 +940,8 @@ def topic_percentage():
         return 'No selected file', 400
 
     # Read the content of the uploaded file
-    content = file.read().decode('utf-8').splitlines()
+    _content = file.read().decode('utf-8').splitlines()
+    content = preprocess_content(_content, remove_words)
     
     # Extract messages from the content
     message_pattern = re.compile(r"\d{1,2}/\d{1,2}/\d{2,4}, \d{1,2}:\d{1,2}\s[APMapm]{2} - .*?: (.*)")
@@ -830,7 +989,8 @@ def topic_percentage_json():
         return 'No selected file', 400
 
     # Read the content of the uploaded file
-    content = file.read().decode('utf-8').splitlines()
+    _content = file.read().decode('utf-8').splitlines()
+    content = preprocess_content(_content, remove_words)
 
     # Extract messages from the content
     message_pattern = re.compile(r"\d{1,2}/\d{1,2}/\d{2,4}, \d{1,2}:\d{1,2}\s[APMapm]{2} - .*?: (.*)")
@@ -878,7 +1038,8 @@ def plot_word_frequency(top_words=20):
         return 'No selected file', 400
 
     # Read the content of the uploaded file
-    content = file.read().decode('utf-8').splitlines()
+    _content = file.read().decode('utf-8').splitlines()
+    content = preprocess_content(_content, remove_words)
 
     # Define a regex pattern to extract the content of each message
     message_pattern = re.compile(r"\d{1,2}/\d{1,2}/\d{2,4}, \d{1,2}:\d{1,2}\s[APMapm]{2} - .*?: (.*)")
@@ -934,7 +1095,8 @@ def plot_cleaned_wordcloud():
 
     if file:
         # 1. Read the content
-        content = file.read().decode('utf-8').splitlines()
+        _content = file.read().decode('utf-8').splitlines()
+        content = preprocess_content(_content, remove_words)
 
         # Regular expression to extract the message content
         message_pattern = re.compile(r"\d{1,2}/\d{1,2}/\d{2,4}, \d{1,2}:\d{1,2}\s[APMapm]{2} - .*?: (.*)")
@@ -992,7 +1154,8 @@ def plot_lengthiest_messages_pie_chart(top_contributors):
         return 'No selected file', 400
 
     # Read the content of the uploaded file
-    content = file.read().decode('utf-8').splitlines()
+    _content = file.read().decode('utf-8').splitlines()
+    content = preprocess_content(_content, remove_words)
 
     # Define a regex pattern to extract participant names and their messages
     message_pattern = re.compile(r"\d{1,2}/\d{1,2}/\d{2,4}, \d{1,2}:\d{1,2}\s[APMapm]{2} - (.*?): (.*)")
@@ -1048,7 +1211,8 @@ def plot_sentiment_distribution():
         return 'No selected file', 400
 
     # Read the content of the uploaded file
-    content = file.read().decode('utf-8').splitlines()
+    _content = file.read().decode('utf-8').splitlines()
+    content = preprocess_content(_content, remove_words)
 
     # Define a regex pattern to extract the content of each message
     message_pattern = re.compile(r"\d{1,2}/\d{1,2}/\d{2,4}, \d{1,2}:\d{1,2}\s[APMapm]{2} - .*?: (.*)")
@@ -1102,16 +1266,31 @@ def plot_hourly_heatmap():
 
     if file:
         # 1. Read the content
-        content = file.read().decode('utf-8').splitlines()
+        _content = file.read().decode('utf-8').splitlines()
+        content = preprocess_content(_content, remove_words)
 
         # Extract hour along with the AM/PM marker using regex
         hour_ampm_pattern = re.compile(r"\d{1,2}/\d{1,2}/\d{2,4}, (\d{1,2}:\d{1,2}\s[APMapm]{2}) - .*?:")
         hours_ampm = [hour_ampm_pattern.search(line).group(1) if hour_ampm_pattern.search(line) else None for line in content]
         hours_ampm = [hour for hour in hours_ampm if hour is not None]
 
-        # Convert the extracted time to 24-hour format
         def convert_to_24_hour(time_str):
-            return pd.to_datetime(time_str).hour
+            # Strip whitespace for accurate comparison
+            time_str = time_str.strip()
+
+            # If the string ends with 'PM' and the hour part is greater than 12, remove the 'PM'
+            if time_str.endswith('PM'):
+                hour_part = int(time_str.split(":")[0])
+                if hour_part >= 12:
+                    time_str = time_str.replace(" PM", "")
+
+            # If the string ends with 'AM' or 'PM', convert to 24-hour format
+            if time_str.endswith('AM') or time_str.endswith('PM'):
+                return pd.to_datetime(time_str).hour
+            else:
+                # The string is already in 24-hour format, just extract the hour part
+                return int(time_str.split(":")[0])
+
 
         hours_24 = [convert_to_24_hour(time_str) for time_str in hours_ampm]
 
@@ -1158,7 +1337,8 @@ def user_message_count():
 
     if file:
         # 1. Read the content
-        content = file.read().decode('utf-8').splitlines()
+        _content = file.read().decode('utf-8').splitlines()
+        content = preprocess_content(_content, remove_words)
 
         # Regular expression to extract the name pattern from a typical line
         name_pattern = re.compile(r"\d{1,2}/\d{1,2}/\d{2,4}, \d{1,2}:\d{1,2}\s[APMapm]{2} - (.*?):")
@@ -1213,7 +1393,8 @@ def most_active_users(num_users):
         return 'No selected file', 400
 
     # Read the uploaded file's content
-    content = file.read().decode('utf-8').splitlines()
+    _content = file.read().decode('utf-8').splitlines()
+    content = preprocess_content(_content, remove_words)
 
     # Define a regex pattern to extract participant names from each message
     name_pattern = re.compile(r"\d{1,2}/\d{1,2}/\d{2,4}, \d{1,2}:\d{1,2}\s[APMapm]{2} - (.*?):")
