@@ -2,6 +2,9 @@ import emoji
 import seaborn as sns
 import numpy as np
 import re
+import os
+import base64
+import requests
 from collections import defaultdict
 from collections import Counter
 from flask import Flask, request, send_file, jsonify, abort
@@ -27,7 +30,14 @@ import pyLDAvis
 matplotlib.use('Agg')  # Set the backend to 'Agg'
 import matplotlib.pyplot as plt
 
+ALLOWED_EXTENSIONS = {'txt', 'zip', 'zipfile'}
 ALLOWED_HOSTS = ["https://analisegrupal.com.br", "https://api.analisegrupal.com.br"]
+
+nltk.download('stopwords')
+nltk.download('wordnet')
+
+_stop_words = set(stopwords.words('portuguese'))
+lemma = WordNetLemmatizer()
 
 app = Flask(__name__)
 CORS(app)
@@ -90,14 +100,6 @@ remove_words = [
     "https", "figurinha omitida", "imagem ocultada", "oculto>", "mídia", "[]", "<Aruivo", "apagada", "Mensagem",
     "<", "editada>", ">"
 ]
-
-ALLOWED_EXTENSIONS = {'txt', 'zip', 'zipfile'}
-
-nltk.download('stopwords')
-nltk.download('wordnet')
-
-_stop_words = set(stopwords.words('portuguese'))
-lemma = WordNetLemmatizer()
 
 def preprocess(text):
     stop_words = _stop_words.union(portuguese_stop_words)
@@ -234,6 +236,33 @@ def home():
 def healthcheck():
     return jsonify(success=True), 200
 
+@app.route('/upload_to_imgur', methods=['POST'])
+def upload_to_imgur():
+    imgur_client_id = os.getenv('IMGUR_CLIENT_ID')
+    if not imgur_client_id:
+        return jsonify({'error': 'IMGUR_CLIENT_ID environment variable not set'}), 500
+    if 'image' not in request.files:
+        return jsonify({'error': 'No image part'}), 400
+    
+    file = request.files['image']
+    if file.filename == '':
+        return jsonify({'error': 'No selected image'}), 400
+    
+    # Read the image and encode it in base64
+    image_b64 = base64.b64encode(file.read())
+
+    headers = {'Authorization': f'Client-ID {imgur_client_id}'}
+    data = {'image': image_b64, 'type': 'base64'}
+
+    # Send the POST request to Imgur
+    response = requests.post('https://api.imgur.com/3/image', headers=headers, data=data)
+    
+    if response.status_code == 200:
+        # Extract the link from the response data
+        link = response.json()['data']['link']
+        return jsonify({'link': link})
+    else:
+        return jsonify({'error': 'Upload failed', 'response': response.json()}), 500
 
 @app.route('/whatsapp/message/topic_modeling', methods=['POST'])
 def topic_modeling():
@@ -1967,4 +1996,4 @@ def most_active_users(num_users):
 
 
 if __name__ == '__main__':
-    app.run(debug=False, host='0.0.0.0', port=5000)
+    app.run(debug=True, host='0.0.0.0', port=5000)
