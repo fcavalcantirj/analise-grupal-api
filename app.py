@@ -94,6 +94,15 @@ sex_pornography_keywords = {
     "preservativo", "camisinha", "vibrador", "strip", "lingerie", "sedução"
 }
 
+alcohol_keywords = {
+    "cerveja", "vinho", "whisky", "vodka", "caipirinha", "tequila", 
+    "bebida", "bar", "pub", "balada", "festa", "drink", "drinks", 
+    "porre", "ressaca", "brinde", "saideira", "happy hour", "destilado", 
+    "fermentado", "alcoólico", "cocktail", "mixologia", "bartender", 
+    "chopp", "bebado", "bebum", "etilico"
+}
+
+
 # TODO improve
 remove_words = [
     "omitted", "Media", "Mas", "mas", "q", "O", "E", "mais", "omitted>", "<Media", "media", "Media", "http", 
@@ -263,6 +272,27 @@ def upload_to_imgur():
         return jsonify({'link': link})
     else:
         return jsonify({'error': 'Upload failed', 'response': response.json()}), 500
+
+
+def is_drinking_invitation(message):
+    """
+    Check if a message contains an invitation to drink.
+
+    Parameters:
+    - message (str): The text message to be analyzed.
+
+    Returns:
+    - bool: True if the message is an invitation to drink, False otherwise.
+    """
+    # Keywords that could indicate an invitation
+    invitations = ["vamo", "vamos", "bora", "partiu", "simba", "simbora", "e aí", "e ai"]
+    
+    # Phrases that suggest the action is drinking
+    drinking_phrases = ["beber", "tomar uma", "porre", "bebericar"]
+    
+    # Check if any combination of invitation and drinking phrase is in the message
+    return any(invite in message for invite in invitations) and any(drink in message for drink in drinking_phrases)
+
 
 @app.route('/whatsapp/message/topic_modeling', methods=['POST'])
 def topic_modeling():
@@ -1324,7 +1354,8 @@ def topic_percentage():
             'politics': sum(1 for msg in messages if any(keyword in msg for keyword in politics_keywords)),
             'religion': sum(1 for msg in messages if any(keyword in msg for keyword in religion_keywords)),
             'soccer': sum(1 for msg in messages if any(keyword in msg for keyword in soccer_keywords)),
-            'sex & pornography': sum(1 for msg in messages if any(keyword in msg for keyword in sex_pornography_keywords))
+            'sex & pornography': sum(1 for msg in messages if any(keyword in msg for keyword in sex_pornography_keywords)),
+            'alcohol': sum(1 for msg in messages if any(keyword in msg for keyword in alcohol_keywords) or is_drinking_invitation(msg))
         }
 
         # Convert message counts to percentages
@@ -1333,7 +1364,7 @@ def topic_percentage():
 
         # Plotting
         plt.figure(figsize=(12, 7))
-        plt.bar(topic_percentages.keys(), topic_percentages.values(), color=['blue', 'green', 'red', 'purple'])
+        plt.bar(topic_percentages.keys(), topic_percentages.values(), color=['blue', 'green', 'red', 'purple', 'orange'])
         plt.ylabel('Percentage of Messages (%)')
         plt.title('Percentage of Messages by Topic')
         
