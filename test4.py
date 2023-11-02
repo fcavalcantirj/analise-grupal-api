@@ -64,6 +64,7 @@ def preprocess_content(content, words_to_remove=['Vic']):
 
 # Sample data lines for testing
 sample_data = [
+    "09/03/2022 18:37 - Tiago Mendes Apu: Não dá pra colocar GNV?",
     "23/03/2018 00:31 - Vic Wolk: Tão no bar ainda??",
     "04/10/2023 06:40 - +55 61 9425-0939: 😭😭😭",
     "'02/10/2023 22:35 - As mensagens e as chamadas são protegidas com a criptografia de ponta a ponta e ficam somente entre você e os participantes desta conversa. Nem mesmo o WhatsApp pode ler ou ouvi-las. Toque para saber mais.'",

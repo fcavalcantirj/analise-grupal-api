@@ -10,9 +10,11 @@ from datetime import datetime
 from LeIA import SentimentIntensityAnalyzer
 from flask_cors import CORS
 import tempfile
+import zipfile
 import io
 import pandas as pd
 import matplotlib
+import chardet
 import nltk
 from nltk.corpus import stopwords
 from nltk.stem.wordnet import WordNetLemmatizer
@@ -30,9 +32,10 @@ ALLOWED_HOSTS = ["https://analisegrupal.com.br", "https://api.analisegrupal.com.
 app = Flask(__name__)
 CORS(app)
 
-# s = SentimentIntensityAnalyzer()
+# s = SentimentIntensityAnalyzer() # non portuguese
 
 # List of common Portuguese stop words
+# TODO improve
 portuguese_stop_words = [
     "omitted", "Media", "Mas", "mas", "q", "O", "E", "mais", "omitted>", "<Media", "é", "pra", "eu", "tá", "http", "https", "a", "ao", "aos", "aquela", "aquelas", "aquele", "aqueles", "aquilo", "as", "até", "com", "como", "da", "das", "de", 
     "dela", "delas", "dele", "deles", "depois", "do", "dos", "e", "ela", "elas", "ele", "eles", "em", "entre", "era", 
@@ -52,6 +55,7 @@ portuguese_stop_words = [
 ]
 
 # Define keywords for each topic
+# TODO improve
 politics_keywords = {
     "presidente", "eleição", "governo", "voto", "partido", "política", 
     "senador", "deputado", "campanha", "ministro", "estado", "município", 
@@ -59,29 +63,35 @@ politics_keywords = {
     "legislação", "corrupção", "tribunal", "justiça", "candidato", "urna", "plebiscito"
 }
 
+# TODO improve
 religion_keywords = {
     "deus", "igreja", "rezar", "religião", "bíblia", "santo", "padre", 
     "oração", "fé", "espírito", "evangélico", "católico", "papa", 
     "culto", "missa", "milagre", "paróquia", "bispo", "pastor", "salmos", "crença"
 }
 
+# TODO improve
 soccer_keywords = {
     "golaco" ,"golaço", "gol", "jogo", "time", "placar", "futebol", "partida", "campeonato", 
     "jogador", "torcida", "estádio", "seleção", "treinador", "escalação", 
     "cartão", "falta", "pênalti", "liga", "derrota", "vitória", "empate", "goleiro", "taça"
 }
 
+# TODO improve
 sex_pornography_keywords = {
     "brotheragem", "holandês", "holandes", "puta", "gostosa", "safada", "pornografia", "nu", "nudez", "sensual", "erotismo", 
     "pornô", "fetiche", "prostituição", "adulto", "orgasmo", "lubrificante", 
     "preservativo", "camisinha", "vibrador", "strip", "lingerie", "sedução"
 }
 
+# TODO improve
 remove_words = [
     "omitted", "Media", "Mas", "mas", "q", "O", "E", "mais", "omitted>", "<Media", "media", "Media", "http", 
     "https", "figurinha omitida", "imagem ocultada", "oculto>", "mídia", "[]", "<Aruivo", "apagada", "Mensagem",
     "<", "editada>", ">"
 ]
+
+ALLOWED_EXTENSIONS = {'txt', 'zip', 'zipfile'}
 
 nltk.download('stopwords')
 nltk.download('wordnet')
@@ -102,7 +112,6 @@ def build_lda_model(texts, num_topics=5):
     lda_model = LdaModel(corpus, num_topics=num_topics, id2word=dictionary, passes=15)
     return lda_model, corpus, dictionary
 
-
 def determine_patterns(first_line):
     if "[" in first_line and "]" in first_line:
         date_pattern = r"\[.*?\]"
@@ -115,36 +124,6 @@ def determine_patterns(first_line):
     
     message_pattern = r"- (.*?): (.*)"
     return date_pattern, message_pattern
-
-def preprocess_content_old(content, words_to_remove=[]):
-    processed_content = []
-    for line in content:
-        # Replace double quotes with single quotes
-        line = line.replace('"', "'")
-        
-        date_pattern, _ = determine_patterns(line)
-        
-        # If date_pattern is None, skip the line
-        if not date_pattern:
-            continue
-
-        # Pattern to match the format like: [09/05/2014, 23:50:59]
-        if date_pattern == r"\[.*?\]":
-            pattern1 = re.compile(r"\[(\d{1,2}/\d{1,2}/\d{2,4}), (\d{1,2}:\d{1,2}:\d{1,2})\] (.*?):")
-            line = pattern1.sub(r"\1, \2 - \3:", line)
-
-            # Pattern to match the format like: [21/04/2022 23:54:40]
-            pattern3 = re.compile(r"\[(\d{1,2}/\d{1,2}/\d{2,4}) (\d{1,2}:\d{1,2}:\d{1,2})\] (.*?):")
-            line = pattern3.sub(lambda m: f"{m.group(1)}, {m.group(2)[:-3]} - {m.group(3)}:", line)
-
-        # Remove specified words
-        for word in words_to_remove:
-            line = line.replace(word, "")
-
-        # Add the processed line to the output list
-        processed_content.append(line)
-        
-    return processed_content
 
 def format_datetime(date, time):
     # Split the date into day, month, and year
@@ -208,49 +187,6 @@ def preprocess_content(content, words_to_remove=['Vic']):
 
     return extracted_content
 
-
-@app.route('/')
-def home():
-    # origin = request.headers.get('Origin') or request.headers.get('Referer')
-    # if not origin or any(allowed_host in origin for allowed_host in ALLOWED_HOSTS):
-    #     abort(403)  # Forbidden
-    return jsonify({"message": "Hello, allowed host!"})
-
-
-@app.route('/healthcheck', methods=['GET'])
-def healthcheck():
-    return jsonify(success=True), 200
-
-@app.route('/whatsapp/message/topic_modeling', methods=['POST'])
-def topic_modeling():
-    # origin = request.headers.get('Origin') or request.headers.get('Referer')
-    # if not origin or any(allowed_host in origin for allowed_host in ALLOWED_HOSTS):
-    #     abort(403)  # Forbidden
-
-    if 'file' not in request.files:
-        return 'No file part', 400
-    file = request.files['file']
-    if file.filename == '':
-        return 'No selected file', 400
-
-    content = file.read().decode('utf-8').splitlines()
-
-    message_pattern = re.compile(r"\d{1,2}/\d{1,2}/\d{2,4}, \d{1,2}:\d{1,2}\s[APMapm]{2} - .*?: (.*)")
-    messages = [message_pattern.search(line).group(1) if message_pattern.search(line) else None for line in content]
-    messages = [msg for msg in messages if msg is not None]
-
-    preprocessed_messages = [preprocess(message) for message in messages]
-    lda_model, corpus, dictionary = build_lda_model(preprocessed_messages, num_topics=5)
-
-    vis_data = gensimvis.prepare(lda_model, corpus, dictionary)
-
-    # This will generate HTML. For a Flask route, you might want to return this HTML.
-    # Or, if you prefer, you can save this to a file and return the file path.
-    html = pyLDAvis.prepared_data_to_html(vis_data)
-
-    return html  # This will directly return the visualization as an HTML page.
-
-
 def extract_emojis(text):
     emoji_pattern = re.compile("["
         u"\U0001F600-\U0001F64F"  # emoticons
@@ -267,74 +203,180 @@ def extract_emojis(text):
         "]+", flags=re.UNICODE)
     return emoji_pattern.findall(text)
 
-@app.route('/whatsapp/message/avg_sentiment_per_person', methods=['POST'])
-def plot_avg_sentiment_per_person():
+def allowed_file(filename):
+    return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
+
+def decode_file(file_stream):
+    try:
+        print("dec.1")
+        return file_stream.read().decode('utf-8').splitlines()
+    except UnicodeDecodeError:
+        print("dec.2")
+        file_stream.seek(0)  # Go back to the beginning of the file
+        raw_data = file_stream.read()
+        encoding = chardet.detect(raw_data)['encoding']
+        file_stream.seek(0)  # Go back to the beginning of the file again
+        return file_stream.read().decode(encoding).splitlines()
+    except Exception as e:
+        print(f"An error occurred in decode_file: {e}")
+        raise  # Re-raise the exception to be handled by the calling function
+
+
+@app.route('/')
+def home():
+    # origin = request.headers.get('Origin') or request.headers.get('Referer')
+    # if not origin or any(allowed_host in origin for allowed_host in ALLOWED_HOSTS):
+    #     abort(403)  # Forbidden
+    return jsonify({"message": "Hello, allowed host!"})
+
+
+@app.route('/healthcheck', methods=['GET'])
+def healthcheck():
+    return jsonify(success=True), 200
+
+
+@app.route('/whatsapp/message/topic_modeling', methods=['POST'])
+def topic_modeling():
     # origin = request.headers.get('Origin') or request.headers.get('Referer')
     # if not origin or any(allowed_host in origin for allowed_host in ALLOWED_HOSTS):
     #     abort(403)  # Forbidden
 
-    # Ensure a file is uploaded with the request
     if 'file' not in request.files:
         return 'No file part', 400
     file = request.files['file']
     if file.filename == '':
         return 'No selected file', 400
+    if not allowed_file(file.filename):
+        print("File type not allowed")
+        return 'File type not allowed', 400
 
-    # Read the content of the uploaded file
-    _content = file.read().decode('utf-8').splitlines()
-    content = preprocess_content(_content, remove_words)
+    try:
+        if zipfile.is_zipfile(file):
+            # print("Processing zip file")
+            with zipfile.ZipFile(file) as z:
+                txt_file = next((f for f in z.namelist() if f.lower().endswith('.txt')), None)
+                if txt_file is None:
+                    # print("No txt file found in the zip")
+                    return 'No txt file found in the zip', 400
+                with z.open(txt_file) as f:
+                    content = preprocess_content(decode_file(f))
+        else:
+            # print("Processing regular txt file")
+            file.seek(0)  # Reset pointer to the beginning of the file
+            _content = file.read().decode('utf-8').splitlines()
+            content = preprocess_content(_content)
 
-    # print(content[:5])
+            message_pattern = re.compile(r"\d{1,2}/\d{1,2}/\d{2,4}, \d{1,2}:\d{1,2}\s[APMapm]{2} - .*?: (.*)")
+            messages = [message_pattern.search(line).group(1) if message_pattern.search(line) else None for line in content]
+            messages = [msg for msg in messages if msg is not None]
+
+            preprocessed_messages = [preprocess(message) for message in messages]
+            lda_model, corpus, dictionary = build_lda_model(preprocessed_messages, num_topics=5)
+
+            vis_data = gensimvis.prepare(lda_model, corpus, dictionary)
+
+            # This will generate HTML. For a Flask route, you might want to return this HTML.
+            # Or, if you prefer, you can save this to a file and return the file path.
+            html = pyLDAvis.prepared_data_to_html(vis_data)
+
+            return html  # This will directly return the visualization as an HTML page.
+
+    except Exception as e:
+        print(f"An error occurred: {e}")
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+    else:
+        # If no other return has been reached, provide a default response
+        print("No processing occurred, returning default response")
+        return jsonify({'status': 'error', 'message': 'No processing occurred'}), 500
+
+@app.route('/whatsapp/message/avg_sentiment_per_person', methods=['POST'])
+def plot_avg_sentiment_per_person():
+    print("Received request for avg_sentiment_per_person")
+    if 'file' not in request.files:
+        print("No file part in request")
+        return 'No file part', 400
+    file = request.files['file']
+    if file.filename == '':
+        print("No selected file")
+        return 'No selected file', 400
+    if not allowed_file(file.filename):
+        print("File type not allowed")
+        return 'File type not allowed', 400
+
+    try:
+        if zipfile.is_zipfile(file):
+            # print("Processing zip file")
+            with zipfile.ZipFile(file) as z:
+                txt_file = next((f for f in z.namelist() if f.lower().endswith('.txt')), None)
+                if txt_file is None:
+                    # print("No txt file found in the zip")
+                    return 'No txt file found in the zip', 400
+                with z.open(txt_file) as f:
+                    content = preprocess_content(decode_file(f))
+        else:
+            # print("Processing regular txt file")
+            file.seek(0)  # Reset pointer to the beginning of the file
+            _content = file.read().decode('utf-8').splitlines()
+            content = preprocess_content(_content)
+
+        # print(f"Content preview: {content[:5]}")
+            
+        # Regular expression to extract timestamp, sender and messages
+        message_pattern = re.compile(r"\d{1,2}/\d{1,2}/\d{2,4}, \d{1,2}:\d{1,2}\s[APMapm]{2} - (.*?): (.*)")
+        extracted_data = [(match.group(1), match.group(2)) for line in content if (match := message_pattern.search(line))]
+
+        senders, messages = zip(*extracted_data)
+
+        # Compute sentiment scores
+        analyzer = SentimentIntensityAnalyzer()
+        sentiments = [analyzer.polarity_scores(msg)['compound'] for msg in messages]
+
+        # Calculate average sentiment per person
+        sender_sentiments = defaultdict(list)
+        for sender, sentiment in zip(senders, sentiments):
+            sender_sentiments[sender].append(sentiment)
+
+        avg_sentiments = {sender: sum(vals)/len(vals) for sender, vals in sender_sentiments.items()}
+
+        if len(avg_sentiments) == 0:  # Check if the DataFrame is empty
+            return "No data available for plotting - avg_sentiments.empty", 400
+
+        N = 20  # Number of senders with the highest sentiment scores to display
+        M = 20  # Number of senders with the lowest sentiment scores to display
+
+        # Sort the dictionary by average sentiment
+        sorted_avg_sentiments = dict(sorted(avg_sentiments.items(), key=lambda item: item[1]))
+
+        # Extract the top N and bottom M senders
+        top_senders = dict(list(sorted_avg_sentiments.items())[-N:])
+        bottom_senders = dict(list(sorted_avg_sentiments.items())[:M])
+
+        # Merge the two dictionaries
+        combined_senders = {**bottom_senders, **top_senders}
+
+        # Plotting
+        plt.figure(figsize=(12, 8))
+        plt.bar(combined_senders.keys(), combined_senders.values(), color='dodgerblue')
+        plt.title("Top and Bottom Senders by Average Sentiment")
+        plt.ylabel("Average Sentiment Score")
+        plt.xlabel("Sender")
+        plt.xticks(rotation=45, ha='right')
+
+        # Save the plot to a temporary file
+        temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".png")
+        plt.tight_layout()
+        plt.savefig(temp_file.name, format='png')
+        plt.close()
+
+        return send_file(temp_file.name, mimetype='image/png')
     
-    # Regular expression to extract timestamp, sender and messages
-    message_pattern = re.compile(r"\d{1,2}/\d{1,2}/\d{2,4}, \d{1,2}:\d{1,2}\s[APMapm]{2} - (.*?): (.*)")
-    extracted_data = [(match.group(1), match.group(2)) for line in content if (match := message_pattern.search(line))]
-
-    senders, messages = zip(*extracted_data)
-
-    # Compute sentiment scores
-    analyzer = SentimentIntensityAnalyzer()
-    sentiments = [analyzer.polarity_scores(msg)['compound'] for msg in messages]
-
-    # Calculate average sentiment per person
-    sender_sentiments = defaultdict(list)
-    for sender, sentiment in zip(senders, sentiments):
-        sender_sentiments[sender].append(sentiment)
-
-    avg_sentiments = {sender: sum(vals)/len(vals) for sender, vals in sender_sentiments.items()}
-
-    if len(avg_sentiments) == 0:  # Check if the DataFrame is empty
-        return "No data available for plotting - avg_sentiments.empty", 400
-
-    N = 20  # Number of senders with the highest sentiment scores to display
-    M = 20  # Number of senders with the lowest sentiment scores to display
-
-    # Sort the dictionary by average sentiment
-    sorted_avg_sentiments = dict(sorted(avg_sentiments.items(), key=lambda item: item[1]))
-
-    # Extract the top N and bottom M senders
-    top_senders = dict(list(sorted_avg_sentiments.items())[-N:])
-    bottom_senders = dict(list(sorted_avg_sentiments.items())[:M])
-
-    # Merge the two dictionaries
-    combined_senders = {**bottom_senders, **top_senders}
-
-    # Plotting
-    plt.figure(figsize=(12, 8))
-    plt.bar(combined_senders.keys(), combined_senders.values(), color='dodgerblue')
-    plt.title("Top and Bottom Senders by Average Sentiment")
-    plt.ylabel("Average Sentiment Score")
-    plt.xlabel("Sender")
-    plt.xticks(rotation=45, ha='right')
-
-    # Save the plot to a temporary file
-    temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".png")
-    plt.tight_layout()
-    plt.savefig(temp_file.name, format='png')
-    plt.close()
-
-    # Send the saved image file as the response
-    return send_file(temp_file.name, mimetype='image/png')
+    except Exception as e:
+        print(f"An error occurred: {e}")
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+    else:
+        # If no other return has been reached, provide a default response
+        print("No processing occurred, returning default response")
+        return jsonify({'status': 'error', 'message': 'No processing occurred'}), 500
 
 
 @app.route('/whatsapp/message/length_over_time', methods=['POST'])
@@ -349,53 +391,77 @@ def plot_message_length_over_time():
     file = request.files['file']
     if file.filename == '':
         return 'No selected file', 400
+    if not allowed_file(file.filename):
+        print("File type not allowed")
+        return 'File type not allowed', 400
 
-    # Read the content of the uploaded file
-    _content = file.read().decode('utf-8').splitlines()
-    content = preprocess_content(_content, remove_words)
+    try:
 
-    # print(content[:5])
-    
-    # Regular expression to extract timestamp and messages
-    message_pattern = re.compile(r"(\d{1,2}/\d{1,2}/\d{2,4}, \d{1,2}:\d{1,2}\s[APMapm]{2}) - .*?: (.*)")
-    extracted_data = [(match.group(1), match.group(2)) for line in content if (match := message_pattern.search(line))]
+        if zipfile.is_zipfile(file):
+            # print("Processing zip file")
+            with zipfile.ZipFile(file) as z:
+                txt_file = next((f for f in z.namelist() if f.lower().endswith('.txt')), None)
+                if txt_file is None:
+                    # print("No txt file found in the zip")
+                    return 'No txt file found in the zip', 400
+                with z.open(txt_file) as f:
+                    content = preprocess_content(decode_file(f))
+        else:
+            # print("Processing regular txt file")
+            file.seek(0)  # Reset pointer to the beginning of the file
+            _content = file.read().decode('utf-8').splitlines()
+            content = preprocess_content(_content)
 
-    # print(extracted_data[:5])
+        # print(f"Content preview: {content[:5]}")
+        
+        # Regular expression to extract timestamp and messages
+        message_pattern = re.compile(r"(\d{1,2}/\d{1,2}/\d{2,4}, \d{1,2}:\d{1,2}\s[APMapm]{2}) - .*?: (.*)")
+        extracted_data = [(match.group(1), match.group(2)) for line in content if (match := message_pattern.search(line))]
 
-    timestamps, messages = zip(*extracted_data)
+        # print(extracted_data[:5])
 
-    # Compute message lengths
-    message_lengths = [len(msg) for msg in messages]
+        timestamps, messages = zip(*extracted_data)
 
-    df = pd.DataFrame({
-    'timestamp': pd.to_datetime(timestamps, errors='coerce', format='%m/%d/%y, %I:%M\u202f%p'),
-    'message_length': [len(msg) for msg in messages]
-}).dropna()
+        # Compute message lengths
+        message_lengths = [len(msg) for msg in messages]
 
-    # print(df)
+        df = pd.DataFrame({
+        'timestamp': pd.to_datetime(timestamps, errors='coerce', format='%m/%d/%y, %I:%M\u202f%p'),
+        'message_length': [len(msg) for msg in messages]
+    }).dropna()
 
-    df.set_index('timestamp', inplace=True)
-    df = df.resample('D').mean()
+        # print(df)
 
-    # print(df)
+        df.set_index('timestamp', inplace=True)
+        df = df.resample('D').mean()
 
-    if df['message_length'].dropna().empty:
-        return "No data available for plotting", 400
+        # print(df)
 
-    # Plotting
-    plt.figure(figsize=(12, 8))
-    df['message_length'].plot()
-    plt.title("Message Length Over Time")
-    plt.ylabel("Average Message Length")
-    plt.xlabel("Date")
+        if df['message_length'].dropna().empty:
+            return "No data available for plotting", 400
 
-    # Save the plot to a temporary file
-    temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".png")
-    plt.savefig(temp_file.name, format='png')
-    plt.close()
+        # Plotting
+        plt.figure(figsize=(12, 8))
+        df['message_length'].plot()
+        plt.title("Message Length Over Time")
+        plt.ylabel("Average Message Length")
+        plt.xlabel("Date")
 
-    # Send the saved image file as the response
-    return send_file(temp_file.name, mimetype='image/png')
+        # Save the plot to a temporary file
+        temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".png")
+        plt.savefig(temp_file.name, format='png')
+        plt.close()
+
+        # Send the saved image file as the response
+        return send_file(temp_file.name, mimetype='image/png')
+
+    except Exception as e:
+        print(f"An error occurred: {e}")
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+    else:
+        # If no other return has been reached, provide a default response
+        print("No processing occurred, returning default response")
+        return jsonify({'status': 'error', 'message': 'No processing occurred'}), 500
 
 @app.route('/whatsapp/message/avg_sentiment_per_person/json', methods=['POST'])
 def avg_sentiment_per_person_json():
@@ -409,30 +475,54 @@ def avg_sentiment_per_person_json():
     file = request.files['file']
     if file.filename == '':
         return 'No selected file', 400
+    if not allowed_file(file.filename):
+        print("File type not allowed")
+        return 'File type not allowed', 400
 
-    # Read the content of the uploaded file
-    _content = file.read().decode('utf-8').splitlines()
-    content = preprocess_content(_content, remove_words)
-    
-    # Regular expression to extract timestamp, sender and messages
-    message_pattern = re.compile(r"\d{1,2}/\d{1,2}/\d{2,4}, \d{1,2}:\d{1,2}\s[APMapm]{2} - (.*?): (.*)")
-    extracted_data = [(match.group(1), match.group(2)) for line in content if (match := message_pattern.search(line))]
+    try:
 
-    senders, messages = zip(*extracted_data)
+        if zipfile.is_zipfile(file):
+            # print("Processing zip file")
+            with zipfile.ZipFile(file) as z:
+                txt_file = next((f for f in z.namelist() if f.lower().endswith('.txt')), None)
+                if txt_file is None:
+                    # print("No txt file found in the zip")
+                    return 'No txt file found in the zip', 400
+                with z.open(txt_file) as f:
+                    content = preprocess_content(decode_file(f))
+        else:
+            # print("Processing regular txt file")
+            file.seek(0)  # Reset pointer to the beginning of the file
+            _content = file.read().decode('utf-8').splitlines()
+            content = preprocess_content(_content)
 
-    # Compute sentiment scores using LeIA
-    analyzer = SentimentIntensityAnalyzer()
-    sentiments = [analyzer.polarity_scores(msg)['compound'] for msg in messages]
+        # Regular expression to extract timestamp, sender and messages
+        message_pattern = re.compile(r"\d{1,2}/\d{1,2}/\d{2,4}, \d{1,2}:\d{1,2}\s[APMapm]{2} - (.*?): (.*)")
+        extracted_data = [(match.group(1), match.group(2)) for line in content if (match := message_pattern.search(line))]
 
-    # Calculate average sentiment per person
-    sender_sentiments = defaultdict(list)
-    for sender, sentiment in zip(senders, sentiments):
-        sender_sentiments[sender].append(sentiment)
+        senders, messages = zip(*extracted_data)
 
-    avg_sentiments = {sender: sum(vals)/len(vals) for sender, vals in sender_sentiments.items()}
+        # Compute sentiment scores using LeIA
+        analyzer = SentimentIntensityAnalyzer()
+        sentiments = [analyzer.polarity_scores(msg)['compound'] for msg in messages]
 
-    # Return the average sentiments as a JSON response
-    return jsonify(avg_sentiments)
+        # Calculate average sentiment per person
+        sender_sentiments = defaultdict(list)
+        for sender, sentiment in zip(senders, sentiments):
+            sender_sentiments[sender].append(sentiment)
+
+        avg_sentiments = {sender: sum(vals)/len(vals) for sender, vals in sender_sentiments.items()}
+
+        # Return the average sentiments as a JSON response
+        return jsonify(avg_sentiments)
+
+    except Exception as e:
+        print(f"An error occurred: {e}")
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+    else:
+        # If no other return has been reached, provide a default response
+        print("No processing occurred, returning default response")
+        return jsonify({'status': 'error', 'message': 'No processing occurred'}), 500
 
 
 @app.route('/whatsapp/message/sentiment_over_time', methods=['POST'])
@@ -447,52 +537,76 @@ def plot_sentiment_over_time():
     file = request.files['file']
     if file.filename == '':
         return 'No selected file', 400
+    if not allowed_file(file.filename):
+        print("File type not allowed")
+        return 'File type not allowed', 400
 
-    # Read the content of the uploaded file
-    _content = file.read().decode('utf-8').splitlines()
-    content = preprocess_content(_content, remove_words)
-    
-    # Regular expression to extract timestamp and messages
-    message_pattern = re.compile(r"(\d{1,2}/\d{1,2}/\d{2,4}, \d{1,2}:\d{1,2}\s[APMapm]{2}) - .*?: (.*)")
-    extracted_data = [(match.group(1), match.group(2)) for line in content if (match := message_pattern.search(line))]
+    try:
 
-    timestamps, messages = zip(*extracted_data)
+        if zipfile.is_zipfile(file):
+            # print("Processing zip file")
+            with zipfile.ZipFile(file) as z:
+                txt_file = next((f for f in z.namelist() if f.lower().endswith('.txt')), None)
+                if txt_file is None:
+                    # print("No txt file found in the zip")
+                    return 'No txt file found in the zip', 400
+                with z.open(txt_file) as f:
+                    content = preprocess_content(decode_file(f))
+        else:
+            # print("Processing regular txt file")
+            file.seek(0)  # Reset pointer to the beginning of the file
+            _content = file.read().decode('utf-8').splitlines()
+            content = preprocess_content(_content)
+        
+        # Regular expression to extract timestamp and messages
+        message_pattern = re.compile(r"(\d{1,2}/\d{1,2}/\d{2,4}, \d{1,2}:\d{1,2}\s[APMapm]{2}) - .*?: (.*)")
+        extracted_data = [(match.group(1), match.group(2)) for line in content if (match := message_pattern.search(line))]
 
-    print(f"Timestamps count: {len(timestamps)}")
+        timestamps, messages = zip(*extracted_data)
 
-    # Compute sentiment scores
-    analyzer = SentimentIntensityAnalyzer()
-    sentiments = [analyzer.polarity_scores(msg)['compound'] for msg in messages]
+        # print(f"Timestamps count: {len(timestamps)}")
 
-    print(f"Sentiments count: {len(sentiments)}")
+        # Compute sentiment scores
+        analyzer = SentimentIntensityAnalyzer()
+        sentiments = [analyzer.polarity_scores(msg)['compound'] for msg in messages]
 
-    df = pd.DataFrame({
-        'timestamp': pd.to_datetime(timestamps, errors='coerce', format='%m/%d/%y, %I:%M %p'),
-        'sentiment': sentiments
-    }).dropna()
+        # print(f"Sentiments count: {len(sentiments)}")
 
-    df.set_index('timestamp', inplace=True)
-    df = df.resample('D').mean().fillna(0)
+        df = pd.DataFrame({
+            'timestamp': pd.to_datetime(timestamps, errors='coerce', format='%m/%d/%y, %I:%M %p'),
+            'sentiment': sentiments
+        }).dropna()
 
-    # print(df.head())  # Print the first few rows of the DataFrame for debugging
+        df.set_index('timestamp', inplace=True)
+        df = df.resample('D').mean().fillna(0)
 
-    if df.empty:  # Check if the DataFrame is empty
-        return "No data available for plotting", 400
+        # print(df.head())  # Print the first few rows of the DataFrame for debugging
 
-    # Plotting
-    plt.figure(figsize=(12, 8))
-    df['sentiment'].plot()
-    plt.title("Sentiment Over Time")
-    plt.ylabel("Sentiment Score")
-    plt.xlabel("Date")
+        if df.empty:  # Check if the DataFrame is empty
+            return "No data available for plotting", 400
 
-    # Save the plot to a temporary file
-    temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".png")
-    plt.savefig(temp_file.name, format='png')
-    plt.close()
+        # Plotting
+        plt.figure(figsize=(12, 8))
+        df['sentiment'].plot()
+        plt.title("Sentiment Over Time")
+        plt.ylabel("Sentiment Score")
+        plt.xlabel("Date")
 
-    # Send the saved image file as the response
-    return send_file(temp_file.name, mimetype='image/png')
+        # Save the plot to a temporary file
+        temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".png")
+        plt.savefig(temp_file.name, format='png')
+        plt.close()
+
+        # Send the saved image file as the response
+        return send_file(temp_file.name, mimetype='image/png')
+
+    except Exception as e:
+        print(f"An error occurred: {e}")
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+    else:
+        # If no other return has been reached, provide a default response
+        print("No processing occurred, returning default response")
+        return jsonify({'status': 'error', 'message': 'No processing occurred'}), 500
 
 @app.route('/whatsapp/message/peak_response_time', methods=['POST'])
 def analyze_peak_response_time():
@@ -506,92 +620,113 @@ def analyze_peak_response_time():
     file = request.files['file']
     if file.filename == '':
         return 'No selected file', 400
+    if not allowed_file(file.filename):
+        print("File type not allowed")
+        return 'File type not allowed', 400
 
-    # Read the content of the uploaded file
-    _content = file.read().decode('utf-8').splitlines()
-    content = preprocess_content(_content, remove_words)
+    try:
 
-    print(content[:10])  # Print the first 10 lines
+        if zipfile.is_zipfile(file):
+            # print("Processing zip file")
+            with zipfile.ZipFile(file) as z:
+                txt_file = next((f for f in z.namelist() if f.lower().endswith('.txt')), None)
+                if txt_file is None:
+                    # print("No txt file found in the zip")
+                    return 'No txt file found in the zip', 400
+                with z.open(txt_file) as f:
+                    content = preprocess_content(decode_file(f))
+        else:
+            # print("Processing regular txt file")
+            file.seek(0)  # Reset pointer to the beginning of the file
+            _content = file.read().decode('utf-8').splitlines()
+            content = preprocess_content(_content)
 
-    # Update the regex pattern
-    timestamp_pattern = re.compile(r"(\d{1,2}/\d{1,2}/\d{2,4}, \d{1,2}:\d{1,2}(?:\s?[APMapm]{2})?) - (.*?):")
+        # print(content[:10])  # Print the first 10 lines
 
-    # Lists to store the extracted timestamps and senders
-    timestamps = []
-    senders = []
+        # Update the regex pattern
+        timestamp_pattern = re.compile(r"(\d{1,2}/\d{1,2}/\d{2,4}, \d{1,2}:\d{1,2}(?:\s?[APMapm]{2})?) - (.*?):")
 
-    # Function to correct invalid time format
-    def correct_time_format(timestamp_str):
-        time_part = timestamp_str.split(", ")[1].split(" ")[0]
-        hour, minute = map(int, time_part.split(":"))
-        
-        if "AM" in timestamp_str or "PM" in timestamp_str:
-            # Adjust for midnight or noon
-            if hour == 0:
-                timestamp_str = timestamp_str.replace("00:", "12:")
-            # Remove PM/AM for 24-hour format
-            if hour >= 12:
-                timestamp_str = timestamp_str.replace(" PM", "")
-            else:
-                timestamp_str = timestamp_str.replace(" AM", "")
-        return timestamp_str
+        # Lists to store the extracted timestamps and senders
+        timestamps = []
+        senders = []
 
-    # Use the modified function in the previous code
-    for line in content:
-        match = timestamp_pattern.search(line)
-        if match:
-            timestamp_str, sender = match.groups()
-            timestamp_str = correct_time_format(timestamp_str)
-            # Adjust datetime parsing based on whether AM/PM exists in the string
+        # Function to correct invalid time format
+        def correct_time_format(timestamp_str):
+            time_part = timestamp_str.split(", ")[1].split(" ")[0]
+            hour, minute = map(int, time_part.split(":"))
+            
             if "AM" in timestamp_str or "PM" in timestamp_str:
-                timestamp_format = "%d/%m/%y, %I:%M %p"
-            else:
-                timestamp_format = "%d/%m/%y, %H:%M"
-            try:
-                timestamp = datetime.strptime(timestamp_str, timestamp_format)
-            except ValueError:
-                timestamp_format = "%m/%d/%y, %H:%M"  # fallback to month/day/year
-                timestamp = datetime.strptime(timestamp_str, timestamp_format)
-            timestamps.append(timestamp)
-            senders.append(sender)
+                # Adjust for midnight or noon
+                if hour == 0:
+                    timestamp_str = timestamp_str.replace("00:", "12:")
+                # Remove PM/AM for 24-hour format
+                if hour >= 12:
+                    timestamp_str = timestamp_str.replace(" PM", "")
+                else:
+                    timestamp_str = timestamp_str.replace(" AM", "")
+            return timestamp_str
 
+        # Use the modified function in the previous code
+        for line in content:
+            match = timestamp_pattern.search(line)
+            if match:
+                timestamp_str, sender = match.groups()
+                timestamp_str = correct_time_format(timestamp_str)
+                # Adjust datetime parsing based on whether AM/PM exists in the string
+                if "AM" in timestamp_str or "PM" in timestamp_str:
+                    timestamp_format = "%d/%m/%y, %I:%M %p"
+                else:
+                    timestamp_format = "%d/%m/%y, %H:%M"
+                try:
+                    timestamp = datetime.strptime(timestamp_str, timestamp_format)
+                except ValueError:
+                    timestamp_format = "%m/%d/%y, %H:%M"  # fallback to month/day/year
+                    timestamp = datetime.strptime(timestamp_str, timestamp_format)
+                timestamps.append(timestamp)
+                senders.append(sender)
 
+        # print("timestamps: ", str(len(timestamps)))
+        # print("senders: ", str(len(senders)))
 
+        # Create a DataFrame from the extracted data
+        df = pd.DataFrame({'Timestamp': timestamps, 'Sender': senders})
 
-    print("timestamps: ", str(len(timestamps)))
-    print("senders: ", str(len(senders)))
+        # Extract the hour from each timestamp
+        df['Hour'] = df['Timestamp'].dt.hour
 
-    # Create a DataFrame from the extracted data
-    df = pd.DataFrame({'Timestamp': timestamps, 'Sender': senders})
+        # Calculate the average number of messages sent per hour
+        avg_hourly_messages = df.groupby('Hour').size()
 
-    # Extract the hour from each timestamp
-    df['Hour'] = df['Timestamp'].dt.hour
+        # Calculate the sender who sent the most messages for each hour
+        dominant_sender = df.groupby('Hour')['Sender'].agg(lambda x: x.value_counts().idxmax())
 
-    # Calculate the average number of messages sent per hour
-    avg_hourly_messages = df.groupby('Hour').size()
+        # Plotting
+        plt.figure(figsize=(12, 7))
+        avg_hourly_messages.plot(kind='bar', color='dodgerblue')
+        plt.xlabel('Hour of the Day')
+        plt.ylabel('Average Messages')
+        plt.title('Average Messages Per Hour and Dominant Sender')
+        
+        # Annotate bars with dominant sender's name
+        for idx, value in enumerate(avg_hourly_messages):
+            plt.text(idx, value + 0.5, dominant_sender.iloc[idx], ha='center', rotation=90, fontsize=8)
 
-    # Calculate the sender who sent the most messages for each hour
-    dominant_sender = df.groupby('Hour')['Sender'].agg(lambda x: x.value_counts().idxmax())
+        # Save the plot to a temporary file
+        temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".png")
+        plt.tight_layout()
+        plt.savefig(temp_file.name, format='png')
+        plt.close()
 
-    # Plotting
-    plt.figure(figsize=(12, 7))
-    avg_hourly_messages.plot(kind='bar', color='dodgerblue')
-    plt.xlabel('Hour of the Day')
-    plt.ylabel('Average Messages')
-    plt.title('Average Messages Per Hour and Dominant Sender')
-    
-    # Annotate bars with dominant sender's name
-    for idx, value in enumerate(avg_hourly_messages):
-        plt.text(idx, value + 0.5, dominant_sender.iloc[idx], ha='center', rotation=90, fontsize=8)
+        # Send the saved image file as the response
+        return send_file(temp_file.name, mimetype='image/png')
 
-    # Save the plot to a temporary file
-    temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".png")
-    plt.tight_layout()
-    plt.savefig(temp_file.name, format='png')
-    plt.close()
-
-    # Send the saved image file as the response
-    return send_file(temp_file.name, mimetype='image/png')
+    except Exception as e:
+        print(f"An error occurred: {e}")
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+    else:
+        # If no other return has been reached, provide a default response
+        print("No processing occurred, returning default response")
+        return jsonify({'status': 'error', 'message': 'No processing occurred'}), 500
 
 @app.route('/whatsapp/message/peak_response_time/json', methods=['POST'])
 def analyze_peak_response_time_json():
@@ -605,45 +740,69 @@ def analyze_peak_response_time_json():
     file = request.files['file']
     if file.filename == '':
         return 'No selected file', 400
+    if not allowed_file(file.filename):
+        print("File type not allowed")
+        return 'File type not allowed', 400
 
-    # Read the content of the uploaded file
-    _content = file.read().decode('utf-8').splitlines()
-    content = preprocess_content(_content, remove_words)
+    try:
 
-    # Define a regex pattern to extract the timestamp and sender's name
-    timestamp_pattern = re.compile(r"(\d{1,2}/\d{1,2}/\d{2,4}, \d{1,2}:\d{1,2}\u202f[APMapm]{2}) - (.*?):")
+        if zipfile.is_zipfile(file):
+            # print("Processing zip file")
+            with zipfile.ZipFile(file) as z:
+                txt_file = next((f for f in z.namelist() if f.lower().endswith('.txt')), None)
+                if txt_file is None:
+                    # print("No txt file found in the zip")
+                    return 'No txt file found in the zip', 400
+                with z.open(txt_file) as f:
+                    content = preprocess_content(decode_file(f))
+        else:
+            # print("Processing regular txt file")
+            file.seek(0)  # Reset pointer to the beginning of the file
+            _content = file.read().decode('utf-8').splitlines()
+            content = preprocess_content(_content)
 
-    # Lists to store the extracted timestamps and senders
-    timestamps = []
-    senders = []
+        # Define a regex pattern to extract the timestamp and sender's name
+        timestamp_pattern = re.compile(r"(\d{1,2}/\d{1,2}/\d{2,4}, \d{1,2}:\d{1,2}\u202f[APMapm]{2}) - (.*?):")
 
-    # Iterate over each line to extract timestamps and sender names
-    for line in content:
-        match = timestamp_pattern.search(line)
-        if match:
-            timestamp_str, sender = match.groups()
-            timestamp = datetime.strptime(timestamp_str, "%m/%d/%y, %I:%M\u202f%p")
-            timestamps.append(timestamp)
-            senders.append(sender)
+        # Lists to store the extracted timestamps and senders
+        timestamps = []
+        senders = []
 
-    # Create a DataFrame from the extracted data
-    df = pd.DataFrame({'Timestamp': timestamps, 'Sender': senders})
+        # Iterate over each line to extract timestamps and sender names
+        for line in content:
+            match = timestamp_pattern.search(line)
+            if match:
+                timestamp_str, sender = match.groups()
+                timestamp = datetime.strptime(timestamp_str, "%m/%d/%y, %I:%M\u202f%p")
+                timestamps.append(timestamp)
+                senders.append(sender)
 
-    # Extract the hour from each timestamp
-    df['Hour'] = df['Timestamp'].dt.hour
+        # Create a DataFrame from the extracted data
+        df = pd.DataFrame({'Timestamp': timestamps, 'Sender': senders})
 
-    # Calculate the average number of messages sent per hour
-    avg_hourly_messages = df.groupby('Hour').size()
+        # Extract the hour from each timestamp
+        df['Hour'] = df['Timestamp'].dt.hour
 
-    # Calculate the sender who sent the most messages for each hour
-    dominant_sender = df.groupby('Hour')['Sender'].agg(lambda x: x.value_counts().idxmax())
+        # Calculate the average number of messages sent per hour
+        avg_hourly_messages = df.groupby('Hour').size()
 
-    # Return the results as a JSON response
-    result = {
-        'AverageMessagesPerHour': avg_hourly_messages.to_dict(),
-        'DominantSenderPerHour': dominant_sender.to_dict()
-    }
-    return jsonify(result)
+        # Calculate the sender who sent the most messages for each hour
+        dominant_sender = df.groupby('Hour')['Sender'].agg(lambda x: x.value_counts().idxmax())
+
+        # Return the results as a JSON response
+        result = {
+            'AverageMessagesPerHour': avg_hourly_messages.to_dict(),
+            'DominantSenderPerHour': dominant_sender.to_dict()
+        }
+        return jsonify(result)
+
+    except Exception as e:
+        print(f"An error occurred: {e}")
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+    else:
+        # If no other return has been reached, provide a default response
+        print("No processing occurred, returning default response")
+        return jsonify({'status': 'error', 'message': 'No processing occurred'}), 500
 
 
 @app.route('/whatsapp/message/activity_heatmap', methods=['POST'])
@@ -658,47 +817,71 @@ def activity_heatmap():
     file = request.files['file']
     if file.filename == '':
         return 'No selected file', 400
+    if not allowed_file(file.filename):
+        print("File type not allowed")
+        return 'File type not allowed', 400
 
-    # Read the content of the uploaded file
-    _content = file.read().decode('utf-8').splitlines()
-    content = preprocess_content(_content, remove_words)
+    try:
 
-    # Define a regex pattern to extract date and time details
-    date_time_pattern = re.compile(r"(\d{1,2}/\d{1,2}/\d{2,4}), (\d{1,2}:\d{1,2})\s[APMapm]{2}")
+        if zipfile.is_zipfile(file):
+            # print("Processing zip file")
+            with zipfile.ZipFile(file) as z:
+                txt_file = next((f for f in z.namelist() if f.lower().endswith('.txt')), None)
+                if txt_file is None:
+                    # print("No txt file found in the zip")
+                    return 'No txt file found in the zip', 400
+                with z.open(txt_file) as f:
+                    content = preprocess_content(decode_file(f))
+        else:
+            # print("Processing regular txt file")
+            file.seek(0)  # Reset pointer to the beginning of the file
+            _content = file.read().decode('utf-8').splitlines()
+            content = preprocess_content(_content)
 
-    # Extract date and time details
-    date_times = [date_time_pattern.search(line).groups() for line in content if date_time_pattern.search(line)]
-    dates, times = zip(*date_times)
+        # Define a regex pattern to extract date and time details
+        date_time_pattern = re.compile(r"(\d{1,2}/\d{1,2}/\d{2,4}), (\d{1,2}:\d{1,2})\s[APMapm]{2}")
 
-    # Convert to pandas datetime format for easier manipulation
-    date_times = pd.to_datetime([' '.join(item) for item in zip(dates, times)], errors='coerce')
-    df = pd.DataFrame({'datetime': date_times})
+        # Extract date and time details
+        date_times = [date_time_pattern.search(line).groups() for line in content if date_time_pattern.search(line)]
+        dates, times = zip(*date_times)
 
-    # Extract day of week and hour from the datetime
-    df['day_of_week'] = df['datetime'].dt.day_name()
-    df['hour'] = df['datetime'].dt.hour
+        # Convert to pandas datetime format for easier manipulation
+        date_times = pd.to_datetime([' '.join(item) for item in zip(dates, times)], errors='coerce')
+        df = pd.DataFrame({'datetime': date_times})
 
-    # Create a pivot table for the heatmap
-    heatmap_data = df.pivot_table(index='day_of_week', columns='hour', aggfunc='size', fill_value=0)
+        # Extract day of week and hour from the datetime
+        df['day_of_week'] = df['datetime'].dt.day_name()
+        df['hour'] = df['datetime'].dt.hour
 
-    # Define the order of days for the y-axis
-    days_order = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
-    heatmap_data = heatmap_data.reindex(days_order)
+        # Create a pivot table for the heatmap
+        heatmap_data = df.pivot_table(index='day_of_week', columns='hour', aggfunc='size', fill_value=0)
 
-    # Plotting the heatmap
-    plt.figure(figsize=(14, 7))
-    sns.heatmap(heatmap_data, cmap='YlGnBu', cbar_kws={'label': 'Number of Messages'})
-    plt.title("Activity Heatmap (Messages over Time)")
-    plt.xlabel("Hour of the Day")
-    plt.ylabel("Day of the Week")
+        # Define the order of days for the y-axis
+        days_order = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
+        heatmap_data = heatmap_data.reindex(days_order)
 
-    # Save the plot to a temporary file
-    temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".png")
-    plt.savefig(temp_file.name, format='png')
-    plt.close()
+        # Plotting the heatmap
+        plt.figure(figsize=(14, 7))
+        sns.heatmap(heatmap_data, cmap='YlGnBu', cbar_kws={'label': 'Number of Messages'})
+        plt.title("Activity Heatmap (Messages over Time)")
+        plt.xlabel("Hour of the Day")
+        plt.ylabel("Day of the Week")
 
-    # Send the saved image file as the response
-    return send_file(temp_file.name, mimetype='image/png')
+        # Save the plot to a temporary file
+        temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".png")
+        plt.savefig(temp_file.name, format='png')
+        plt.close()
+
+        # Send the saved image file as the response
+        return send_file(temp_file.name, mimetype='image/png')
+
+    except Exception as e:
+        print(f"An error occurred: {e}")
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+    else:
+        # If no other return has been reached, provide a default response
+        print("No processing occurred, returning default response")
+        return jsonify({'status': 'error', 'message': 'No processing occurred'}), 500
 
 @app.route('/whatsapp/message/user_activity_over_time', methods=['POST'])
 def user_activity_over_time():
@@ -712,40 +895,64 @@ def user_activity_over_time():
     file = request.files['file']
     if file.filename == '':
         return 'No selected file', 400
+    if not allowed_file(file.filename):
+        print("File type not allowed")
+        return 'File type not allowed', 400
 
-    # Read the content of the uploaded file
-    _content = file.read().decode('utf-8').splitlines()
-    content = preprocess_content(_content, remove_words)
+    try:
 
-    # Define a regex pattern to extract the date and participant names
-    message_pattern = re.compile(r"(\d{1,2}/\d{1,2}/\d{2,4}), \d{1,2}:\d{1,2}\s[APMapm]{2} - (.*?): .*")
-    
-    # Extract dates and names
-    dates_names = [(match.group(1), match.group(2)) for line in content if (match := message_pattern.search(line))]
-    
-    # Convert to DataFrame
-    df = pd.DataFrame(dates_names, columns=['Date', 'Name'])
-    df['Date'] = pd.to_datetime(df['Date'], errors='coerce')
-    
-    # Group by date and name and count messages
-    grouped = df.groupby(['Date', 'Name']).size().unstack(fill_value=0)
-    
-    # Plotting
-    plt.figure(figsize=(15, 8))
-    for column in grouped.columns:
-        plt.plot(grouped.index, grouped[column], label=column)
-    plt.title("User Activity Over Time")
-    plt.xlabel("Date")
-    plt.ylabel("Number of Messages")
-    plt.legend(loc="upper right")
-    
-    # Save the plot to a temporary file
-    temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".png")
-    plt.savefig(temp_file.name, format='png')
-    plt.close()
+        if zipfile.is_zipfile(file):
+            # print("Processing zip file")
+            with zipfile.ZipFile(file) as z:
+                txt_file = next((f for f in z.namelist() if f.lower().endswith('.txt')), None)
+                if txt_file is None:
+                    # print("No txt file found in the zip")
+                    return 'No txt file found in the zip', 400
+                with z.open(txt_file) as f:
+                    content = preprocess_content(decode_file(f))
+        else:
+            # print("Processing regular txt file")
+            file.seek(0)  # Reset pointer to the beginning of the file
+            _content = file.read().decode('utf-8').splitlines()
+            content = preprocess_content(_content)
 
-    # Send the saved image file as the response
-    return send_file(temp_file.name, mimetype='image/png')
+        # Define a regex pattern to extract the date and participant names
+        message_pattern = re.compile(r"(\d{1,2}/\d{1,2}/\d{2,4}), \d{1,2}:\d{1,2}\s[APMapm]{2} - (.*?): .*")
+        
+        # Extract dates and names
+        dates_names = [(match.group(1), match.group(2)) for line in content if (match := message_pattern.search(line))]
+        
+        # Convert to DataFrame
+        df = pd.DataFrame(dates_names, columns=['Date', 'Name'])
+        df['Date'] = pd.to_datetime(df['Date'], errors='coerce')
+        
+        # Group by date and name and count messages
+        grouped = df.groupby(['Date', 'Name']).size().unstack(fill_value=0)
+        
+        # Plotting
+        plt.figure(figsize=(15, 8))
+        for column in grouped.columns:
+            plt.plot(grouped.index, grouped[column], label=column)
+        plt.title("User Activity Over Time")
+        plt.xlabel("Date")
+        plt.ylabel("Number of Messages")
+        plt.legend(loc="upper right")
+        
+        # Save the plot to a temporary file
+        temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".png")
+        plt.savefig(temp_file.name, format='png')
+        plt.close()
+
+        # Send the saved image file as the response
+        return send_file(temp_file.name, mimetype='image/png')
+
+    except Exception as e:
+        print(f"An error occurred: {e}")
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+    else:
+        # If no other return has been reached, provide a default response
+        print("No processing occurred, returning default response")
+        return jsonify({'status': 'error', 'message': 'No processing occurred'}), 500
 
 @app.route('/whatsapp/message/top_emojis_json/<int:top_n>', methods=['POST'])
 def get_top_emojis_json(top_n=10):
@@ -759,27 +966,51 @@ def get_top_emojis_json(top_n=10):
     file = request.files['file']
     if file.filename == '':
         return 'No selected file', 400
+    if not allowed_file(file.filename):
+        print("File type not allowed")
+        return 'File type not allowed', 400
 
-    # Read the content of the uploaded file
-    _content = file.read().decode('utf-8').splitlines()
-    content = preprocess_content(_content, remove_words)
+    try:
 
-    # Define a regex pattern to extract the message content
-    message_pattern = re.compile(r"\d{1,2}/\d{1,2}/\d{2,4}, \d{1,2}:\d{1,2}\s[APMapm]{2} - .*?: (.*)")
-    messages = [message_pattern.search(line).group(1) if message_pattern.search(line) else None for line in content]
-    messages = [msg for msg in messages if msg is not None]
+        if zipfile.is_zipfile(file):
+            # print("Processing zip file")
+            with zipfile.ZipFile(file) as z:
+                txt_file = next((f for f in z.namelist() if f.lower().endswith('.txt')), None)
+                if txt_file is None:
+                    # print("No txt file found in the zip")
+                    return 'No txt file found in the zip', 400
+                with z.open(txt_file) as f:
+                    content = preprocess_content(decode_file(f))
+        else:
+            # print("Processing regular txt file")
+            file.seek(0)  # Reset pointer to the beginning of the file
+            _content = file.read().decode('utf-8').splitlines()
+            content = preprocess_content(_content)
 
-    # Count the emojis
-    all_emojis = [emoji for message in messages for emoji in extract_emojis(message)]
-    emoji_counts = Counter(all_emojis)
+        # Define a regex pattern to extract the message content
+        message_pattern = re.compile(r"\d{1,2}/\d{1,2}/\d{2,4}, \d{1,2}:\d{1,2}\s[APMapm]{2} - .*?: (.*)")
+        messages = [message_pattern.search(line).group(1) if message_pattern.search(line) else None for line in content]
+        messages = [msg for msg in messages if msg is not None]
 
-    print(emoji_counts)
+        # Count the emojis
+        all_emojis = [emoji for message in messages for emoji in extract_emojis(message)]
+        emoji_counts = Counter(all_emojis)
 
-    # Prepare data for output
-    sorted_emoji_counts = sorted(emoji_counts.items(), key=lambda x: x[1], reverse=True)[:top_n]
-    
-    # Return the sorted emoji count as JSON
-    return jsonify(sorted_emoji_counts)
+        print(emoji_counts)
+
+        # Prepare data for output
+        sorted_emoji_counts = sorted(emoji_counts.items(), key=lambda x: x[1], reverse=True)[:top_n]
+        
+        # Return the sorted emoji count as JSON
+        return jsonify(sorted_emoji_counts)
+
+    except Exception as e:
+        print(f"An error occurred: {e}")
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+    else:
+        # If no other return has been reached, provide a default response
+        print("No processing occurred, returning default response")
+        return jsonify({'status': 'error', 'message': 'No processing occurred'}), 500
 
 # Conversational Turn Analysis
 # In a group chat, it's interesting to see how often the conversation "turns" 
@@ -800,53 +1031,77 @@ def plot_conversational_turns():
     file = request.files['file']
     if file.filename == '':
         return 'No selected file', 400
+    if not allowed_file(file.filename):
+        print("File type not allowed")
+        return 'File type not allowed', 400
 
-    # Read the content of the uploaded file
-    _content = file.read().decode('utf-8').splitlines()
-    content = preprocess_content(_content, remove_words)
+    try:
 
-    # Define a regex pattern to extract the sender of each message
-    sender_pattern = re.compile(r"\d{1,2}/\d{1,2}/\d{2,4}, \d{1,2}:\d{1,2}\s[APMapm]{2} - (.*?):")
-    senders = [sender_pattern.search(line).group(1) if sender_pattern.search(line) else None for line in content]
-    senders = [sender for sender in senders if sender is not None]
- 
-    # Count the conversational turns
-    turn_counts = defaultdict(int)
-    previous_sender = None
-    for sender in senders:
-        if sender != previous_sender:
-            turn_counts[sender] += 1
-        previous_sender = sender
+        if zipfile.is_zipfile(file):
+            # print("Processing zip file")
+            with zipfile.ZipFile(file) as z:
+                txt_file = next((f for f in z.namelist() if f.lower().endswith('.txt')), None)
+                if txt_file is None:
+                    # print("No txt file found in the zip")
+                    return 'No txt file found in the zip', 400
+                with z.open(txt_file) as f:
+                    content = preprocess_content(decode_file(f))
+        else:
+            # print("Processing regular txt file")
+            file.seek(0)  # Reset pointer to the beginning of the file
+            _content = file.read().decode('utf-8').splitlines()
+            content = preprocess_content(_content)
 
-    N = 20  # Number of senders with the most conversational turns to display
-    M = 5  # Number of senders with the fewest conversational turns to display
+        # Define a regex pattern to extract the sender of each message
+        sender_pattern = re.compile(r"\d{1,2}/\d{1,2}/\d{2,4}, \d{1,2}:\d{1,2}\s[APMapm]{2} - (.*?):")
+        senders = [sender_pattern.search(line).group(1) if sender_pattern.search(line) else None for line in content]
+        senders = [sender for sender in senders if sender is not None]
+     
+        # Count the conversational turns
+        turn_counts = defaultdict(int)
+        previous_sender = None
+        for sender in senders:
+            if sender != previous_sender:
+                turn_counts[sender] += 1
+            previous_sender = sender
 
-    # Sort the dictionary by number of turns
-    sorted_turn_counts = sorted(turn_counts.items(), key=lambda item: item[1])
+        N = 20  # Number of senders with the most conversational turns to display
+        M = 5  # Number of senders with the fewest conversational turns to display
 
-    # Extract the top N and bottom M senders
-    top_senders = dict(list(sorted_turn_counts)[-N:])
-    bottom_senders = dict(list(sorted_turn_counts)[:M])
+        # Sort the dictionary by number of turns
+        sorted_turn_counts = sorted(turn_counts.items(), key=lambda item: item[1])
 
-    # Merge the two dictionaries
-    combined_senders = {**bottom_senders, **top_senders}
+        # Extract the top N and bottom M senders
+        top_senders = dict(list(sorted_turn_counts)[-N:])
+        bottom_senders = dict(list(sorted_turn_counts)[:M])
 
-    # Plotting the data
-    plt.figure(figsize=(12, 8))
-    names, counts = zip(*combined_senders.items())
-    plt.barh(names, counts, color='mediumseagreen')
-    plt.xlabel('Number of Turns')
-    plt.ylabel('Names')
-    plt.title("Top and Bottom Senders by Conversational Turns")
-    plt.gca().invert_yaxis()
+        # Merge the two dictionaries
+        combined_senders = {**bottom_senders, **top_senders}
 
-    # Save the plot to a temporary file
-    temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".png")
-    plt.savefig(temp_file.name, format='png')
-    plt.close()
+        # Plotting the data
+        plt.figure(figsize=(12, 8))
+        names, counts = zip(*combined_senders.items())
+        plt.barh(names, counts, color='mediumseagreen')
+        plt.xlabel('Number of Turns')
+        plt.ylabel('Names')
+        plt.title("Top and Bottom Senders by Conversational Turns")
+        plt.gca().invert_yaxis()
 
-    # Send the saved image file as the response
-    return send_file(temp_file.name, mimetype='image/png')
+        # Save the plot to a temporary file
+        temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".png")
+        plt.savefig(temp_file.name, format='png')
+        plt.close()
+
+        # Send the saved image file as the response
+        return send_file(temp_file.name, mimetype='image/png')
+
+    except Exception as e:
+        print(f"An error occurred: {e}")
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+    else:
+        # If no other return has been reached, provide a default response
+        print("No processing occurred, returning default response")
+        return jsonify({'status': 'error', 'message': 'No processing occurred'}), 500
 
 
 # WEIRD
@@ -862,43 +1117,67 @@ def mention_analysis():
     file = request.files['file']
     if file.filename == '':
         return 'No selected file', 400
+    if not allowed_file(file.filename):
+        print("File type not allowed")
+        return 'File type not allowed', 400
 
-    # Read the content of the uploaded file
-    _content = file.read().decode('utf-8').splitlines()
-    content = preprocess_content(_content, remove_words)
-    
-    # Regular expression to extract sender and messages
-    message_pattern = re.compile(r"\d{1,2}/\d{1,2}/\d{2,4}, \d{1,2}:\d{1,2}\s[APMapm]{2} - (.*?): (.*)")
-    extracted_data = [(match.group(1), match.group(2)) for line in content if (match := message_pattern.search(line))]
+    try:
 
-    senders, messages = zip(*extracted_data)
-    all_senders = set(senders)
+        if zipfile.is_zipfile(file):
+            # print("Processing zip file")
+            with zipfile.ZipFile(file) as z:
+                txt_file = next((f for f in z.namelist() if f.lower().endswith('.txt')), None)
+                if txt_file is None:
+                    # print("No txt file found in the zip")
+                    return 'No txt file found in the zip', 400
+                with z.open(txt_file) as f:
+                    content = preprocess_content(decode_file(f))
+        else:
+            # print("Processing regular txt file")
+            file.seek(0)  # Reset pointer to the beginning of the file
+            _content = file.read().decode('utf-8').splitlines()
+            content = preprocess_content(_content)
 
-    mention_counts = defaultdict(lambda: defaultdict(int))
-    for sender, message in extracted_data:
-        for potential_mention in all_senders:
-            if potential_mention in message:
-                mention_counts[sender][potential_mention] += 1
+        # Regular expression to extract sender and messages
+        message_pattern = re.compile(r"\d{1,2}/\d{1,2}/\d{2,4}, \d{1,2}:\d{1,2}\s[APMapm]{2} - (.*?): (.*)")
+        extracted_data = [(match.group(1), match.group(2)) for line in content if (match := message_pattern.search(line))]
 
-    # Preparing data for plotting
-    names = list(all_senders)
-    mention_matrix = [[mention_counts[sender][mentioned] for mentioned in names] for sender in names]
+        senders, messages = zip(*extracted_data)
+        all_senders = set(senders)
 
-    # Visualizing the data
-    plt.figure(figsize=(12, 8))
-    plt.imshow(mention_matrix, cmap='viridis', interpolation='nearest')
-    plt.xticks(ticks=range(len(names)), labels=names, rotation=45)
-    plt.yticks(ticks=range(len(names)), labels=names)
-    plt.colorbar(label="Mention Counts")
-    plt.title("Mention Analysis")
-    
-    # Save the plot to a temporary file
-    temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".png")
-    plt.savefig(temp_file.name, format='png')
-    plt.close()
+        mention_counts = defaultdict(lambda: defaultdict(int))
+        for sender, message in extracted_data:
+            for potential_mention in all_senders:
+                if potential_mention in message:
+                    mention_counts[sender][potential_mention] += 1
 
-    # Send the saved image file as the response
-    return send_file(temp_file.name, mimetype='image/png')
+        # Preparing data for plotting
+        names = list(all_senders)
+        mention_matrix = [[mention_counts[sender][mentioned] for mentioned in names] for sender in names]
+
+        # Visualizing the data
+        plt.figure(figsize=(12, 8))
+        plt.imshow(mention_matrix, cmap='viridis', interpolation='nearest')
+        plt.xticks(ticks=range(len(names)), labels=names, rotation=45)
+        plt.yticks(ticks=range(len(names)), labels=names)
+        plt.colorbar(label="Mention Counts")
+        plt.title("Mention Analysis")
+        
+        # Save the plot to a temporary file
+        temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".png")
+        plt.savefig(temp_file.name, format='png')
+        plt.close()
+
+        # Send the saved image file as the response
+        return send_file(temp_file.name, mimetype='image/png')
+
+    except Exception as e:
+        print(f"An error occurred: {e}")
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+    else:
+        # If no other return has been reached, provide a default response
+        print("No processing occurred, returning default response")
+        return jsonify({'status': 'error', 'message': 'No processing occurred'}), 500
 
 
 @app.route('/whatsapp/message/active_days', methods=['POST'])
@@ -913,41 +1192,65 @@ def plot_active_days():
     file = request.files['file']
     if file.filename == '':
         return 'No selected file', 400
+    if not allowed_file(file.filename):
+        print("File type not allowed")
+        return 'File type not allowed', 400
 
-    # Read the content of the uploaded file
-    _content = file.read().decode('utf-8').splitlines()
-    content = preprocess_content(_content, remove_words)
+    try:
 
-    # Define a regex pattern to extract the date of each message
-    date_pattern = re.compile(r"(\d{1,2}/\d{1,2}/\d{2,4}), \d{1,2}:\d{1,2}\s[APMapm]{2} - .*?:")
-    dates = [date_pattern.search(line).group(1) if date_pattern.search(line) else None for line in content]
-    dates = [date for date in dates if date is not None]
+        if zipfile.is_zipfile(file):
+            # print("Processing zip file")
+            with zipfile.ZipFile(file) as z:
+                txt_file = next((f for f in z.namelist() if f.lower().endswith('.txt')), None)
+                if txt_file is None:
+                    # print("No txt file found in the zip")
+                    return 'No txt file found in the zip', 400
+                with z.open(txt_file) as f:
+                    content = preprocess_content(decode_file(f))
+        else:
+            # print("Processing regular txt file")
+            file.seek(0)  # Reset pointer to the beginning of the file
+            _content = file.read().decode('utf-8').splitlines()
+            content = preprocess_content(_content)
 
-    # Convert the dates to days of the week
-    days_of_week = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
-    days = [days_of_week[pd.to_datetime(date).dayofweek] for date in dates]
+        # Define a regex pattern to extract the date of each message
+        date_pattern = re.compile(r"(\d{1,2}/\d{1,2}/\d{2,4}), \d{1,2}:\d{1,2}\s[APMapm]{2} - .*?:")
+        dates = [date_pattern.search(line).group(1) if date_pattern.search(line) else None for line in content]
+        dates = [date for date in dates if date is not None]
 
-    # Count the messages for each day of the week
-    day_counts = Counter(days)
+        # Convert the dates to days of the week
+        days_of_week = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
+        days = [days_of_week[pd.to_datetime(date).dayofweek] for date in dates]
 
-    # Prepare data for plotting
-    day_labels = days_of_week
-    day_values = [day_counts.get(day, 0) for day in day_labels]
+        # Count the messages for each day of the week
+        day_counts = Counter(days)
 
-    # Plotting the data
-    plt.figure(figsize=(12, 7))
-    plt.bar(day_labels, day_values, color='lightcoral')
-    plt.xlabel('Day of the Week')
-    plt.ylabel('Number of Messages')
-    plt.title("Activity Analysis by Day of the Week")
+        # Prepare data for plotting
+        day_labels = days_of_week
+        day_values = [day_counts.get(day, 0) for day in day_labels]
 
-    # Save the plot to a temporary file
-    temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".png")
-    plt.savefig(temp_file.name, format='png')
-    plt.close()
+        # Plotting the data
+        plt.figure(figsize=(12, 7))
+        plt.bar(day_labels, day_values, color='lightcoral')
+        plt.xlabel('Day of the Week')
+        plt.ylabel('Number of Messages')
+        plt.title("Activity Analysis by Day of the Week")
 
-    # Send the saved image file as the response
-    return send_file(temp_file.name, mimetype='image/png')
+        # Save the plot to a temporary file
+        temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".png")
+        plt.savefig(temp_file.name, format='png')
+        plt.close()
+
+        # Send the saved image file as the response
+        return send_file(temp_file.name, mimetype='image/png')
+
+    except Exception as e:
+        print(f"An error occurred: {e}")
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+    else:
+        # If no other return has been reached, provide a default response
+        print("No processing occurred, returning default response")
+        return jsonify({'status': 'error', 'message': 'No processing occurred'}), 500
 
 @app.route('/whatsapp/message/topic_percentage', methods=['POST'])
 def topic_percentage():
@@ -961,41 +1264,65 @@ def topic_percentage():
     file = request.files['file']
     if file.filename == '':
         return 'No selected file', 400
+    if not allowed_file(file.filename):
+        print("File type not allowed")
+        return 'File type not allowed', 400
 
-    # Read the content of the uploaded file
-    _content = file.read().decode('utf-8').splitlines()
-    content = preprocess_content(_content, remove_words)
-    
-    # Extract messages from the content
-    message_pattern = re.compile(r"\d{1,2}/\d{1,2}/\d{2,4}, \d{1,2}:\d{1,2}\s[APMapm]{2} - .*?: (.*)")
-    messages = [message_pattern.search(line).group(1) if message_pattern.search(line) else None for line in content]
-    messages = [msg for msg in messages if msg is not None]
+    try:
 
-    # Check messages for presence of keywords
-    topic_counts = {
-        'politics': sum(1 for msg in messages if any(keyword in msg for keyword in politics_keywords)),
-        'religion': sum(1 for msg in messages if any(keyword in msg for keyword in religion_keywords)),
-        'soccer': sum(1 for msg in messages if any(keyword in msg for keyword in soccer_keywords)),
-        'sex & pornography': sum(1 for msg in messages if any(keyword in msg for keyword in sex_pornography_keywords))
-    }
+        if zipfile.is_zipfile(file):
+            # print("Processing zip file")
+            with zipfile.ZipFile(file) as z:
+                txt_file = next((f for f in z.namelist() if f.lower().endswith('.txt')), None)
+                if txt_file is None:
+                    # print("No txt file found in the zip")
+                    return 'No txt file found in the zip', 400
+                with z.open(txt_file) as f:
+                    content = preprocess_content(decode_file(f))
+        else:
+            # print("Processing regular txt file")
+            file.seek(0)  # Reset pointer to the beginning of the file
+            _content = file.read().decode('utf-8').splitlines()
+            content = preprocess_content(_content)
+        
+        # Extract messages from the content
+        message_pattern = re.compile(r"\d{1,2}/\d{1,2}/\d{2,4}, \d{1,2}:\d{1,2}\s[APMapm]{2} - .*?: (.*)")
+        messages = [message_pattern.search(line).group(1) if message_pattern.search(line) else None for line in content]
+        messages = [msg for msg in messages if msg is not None]
 
-    # Convert message counts to percentages
-    total_messages = len(messages)
-    topic_percentages = {topic: (count/total_messages)*100 for topic, count in topic_counts.items()}
+        # Check messages for presence of keywords
+        topic_counts = {
+            'politics': sum(1 for msg in messages if any(keyword in msg for keyword in politics_keywords)),
+            'religion': sum(1 for msg in messages if any(keyword in msg for keyword in religion_keywords)),
+            'soccer': sum(1 for msg in messages if any(keyword in msg for keyword in soccer_keywords)),
+            'sex & pornography': sum(1 for msg in messages if any(keyword in msg for keyword in sex_pornography_keywords))
+        }
 
-    # Plotting
-    plt.figure(figsize=(12, 7))
-    plt.bar(topic_percentages.keys(), topic_percentages.values(), color=['blue', 'green', 'red', 'purple'])
-    plt.ylabel('Percentage of Messages (%)')
-    plt.title('Percentage of Messages by Topic')
-    
-    # Save the plot to a temporary file
-    temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".png")
-    plt.savefig(temp_file.name, format='png')
-    plt.close()
+        # Convert message counts to percentages
+        total_messages = len(messages)
+        topic_percentages = {topic: (count/total_messages)*100 for topic, count in topic_counts.items()}
 
-    # Send the saved image file as the response
-    return send_file(temp_file.name, mimetype='image/png')
+        # Plotting
+        plt.figure(figsize=(12, 7))
+        plt.bar(topic_percentages.keys(), topic_percentages.values(), color=['blue', 'green', 'red', 'purple'])
+        plt.ylabel('Percentage of Messages (%)')
+        plt.title('Percentage of Messages by Topic')
+        
+        # Save the plot to a temporary file
+        temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".png")
+        plt.savefig(temp_file.name, format='png')
+        plt.close()
+
+        # Send the saved image file as the response
+        return send_file(temp_file.name, mimetype='image/png')
+
+    except Exception as e:
+        print(f"An error occurred: {e}")
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+    else:
+        # If no other return has been reached, provide a default response
+        print("No processing occurred, returning default response")
+        return jsonify({'status': 'error', 'message': 'No processing occurred'}), 500
 
 
 @app.route('/whatsapp/message/topic_percentage/json', methods=['POST'])
@@ -1010,41 +1337,65 @@ def topic_percentage_json():
     file = request.files['file']
     if file.filename == '':
         return 'No selected file', 400
+    if not allowed_file(file.filename):
+        print("File type not allowed")
+        return 'File type not allowed', 400
 
-    # Read the content of the uploaded file
-    _content = file.read().decode('utf-8').splitlines()
-    content = preprocess_content(_content, remove_words)
+    try:
 
-    # Extract messages from the content
-    message_pattern = re.compile(r"\d{1,2}/\d{1,2}/\d{2,4}, \d{1,2}:\d{1,2}\s[APMapm]{2} - .*?: (.*)")
-    messages = " ".join([message_pattern.search(line).group(1) if message_pattern.search(line) else "" for line in content])
+        if zipfile.is_zipfile(file):
+            # print("Processing zip file")
+            with zipfile.ZipFile(file) as z:
+                txt_file = next((f for f in z.namelist() if f.lower().endswith('.txt')), None)
+                if txt_file is None:
+                    # print("No txt file found in the zip")
+                    return 'No txt file found in the zip', 400
+                with z.open(txt_file) as f:
+                    content = preprocess_content(decode_file(f))
+        else:
+            # print("Processing regular txt file")
+            file.seek(0)  # Reset pointer to the beginning of the file
+            _content = file.read().decode('utf-8').splitlines()
+            content = preprocess_content(_content)
 
-    # Preprocess the text
-    messages = messages.lower()
-    tokens = word_tokenize(messages)
+        # Extract messages from the content
+        message_pattern = re.compile(r"\d{1,2}/\d{1,2}/\d{2,4}, \d{1,2}:\d{1,2}\s[APMapm]{2} - .*?: (.*)")
+        messages = " ".join([message_pattern.search(line).group(1) if message_pattern.search(line) else "" for line in content])
 
-    # Remove stopwords
-    # stop_words = set(stopwords.words('portuguese'))
-    stop_words = _stop_words.union(portuguese_stop_words)
-    tokens = [token for token in tokens if token not in stop_words]
+        # Preprocess the text
+        messages = messages.lower()
+        tokens = word_tokenize(messages)
 
-    # Count occurrences
-    politics_count = sum(token in politics_keywords for token in tokens)
-    religion_count = sum(token in religion_keywords for token in tokens)
-    soccer_count = sum(token in soccer_keywords for token in tokens)
+        # Remove stopwords
+        # stop_words = set(stopwords.words('portuguese'))
+        stop_words = _stop_words.union(portuguese_stop_words)
+        tokens = [token for token in tokens if token not in stop_words]
 
-    total_words = len(tokens)
+        # Count occurrences
+        politics_count = sum(token in politics_keywords for token in tokens)
+        religion_count = sum(token in religion_keywords for token in tokens)
+        soccer_count = sum(token in soccer_keywords for token in tokens)
 
-    # Calculate percentages
-    politics_percentage = (politics_count / total_words) * 100
-    religion_percentage = (religion_count / total_words) * 100
-    soccer_percentage = (soccer_count / total_words) * 100
+        total_words = len(tokens)
 
-    return jsonify({
-        "politics_percentage": politics_percentage,
-        "religion_percentage": religion_percentage,
-        "soccer_percentage": soccer_percentage
-    })
+        # Calculate percentages
+        politics_percentage = (politics_count / total_words) * 100
+        religion_percentage = (religion_count / total_words) * 100
+        soccer_percentage = (soccer_count / total_words) * 100
+
+        return jsonify({
+            "politics_percentage": politics_percentage,
+            "religion_percentage": religion_percentage,
+            "soccer_percentage": soccer_percentage
+        })
+
+    except Exception as e:
+        print(f"An error occurred: {e}")
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+    else:
+        # If no other return has been reached, provide a default response
+        print("No processing occurred, returning default response")
+        return jsonify({'status': 'error', 'message': 'No processing occurred'}), 500
 
 
 @app.route('/whatsapp/message/wordfrequency/<int:top_words>', methods=['POST'])
@@ -1059,48 +1410,72 @@ def plot_word_frequency(top_words=20):
     file = request.files['file']
     if file.filename == '':
         return 'No selected file', 400
+    if not allowed_file(file.filename):
+        print("File type not allowed")
+        return 'File type not allowed', 400
 
-    # Read the content of the uploaded file
-    _content = file.read().decode('utf-8').splitlines()
-    content = preprocess_content(_content, remove_words)
+    try:
 
-    # Define a regex pattern to extract the content of each message
-    message_pattern = re.compile(r"\d{1,2}/\d{1,2}/\d{2,4}, \d{1,2}:\d{1,2}\s[APMapm]{2} - .*?: (.*)")
-    messages = [message_pattern.search(line).group(1) if message_pattern.search(line) else None for line in content]
-    messages = [message for message in messages if message is not None]
+        if zipfile.is_zipfile(file):
+            # print("Processing zip file")
+            with zipfile.ZipFile(file) as z:
+                txt_file = next((f for f in z.namelist() if f.lower().endswith('.txt')), None)
+                if txt_file is None:
+                    # print("No txt file found in the zip")
+                    return 'No txt file found in the zip', 400
+                with z.open(txt_file) as f:
+                    content = preprocess_content(decode_file(f))
+        else:
+            # print("Processing regular txt file")
+            file.seek(0)  # Reset pointer to the beginning of the file
+            _content = file.read().decode('utf-8').splitlines()
+            content = preprocess_content(_content)
 
-    stop_words = _stop_words.union(portuguese_stop_words)
+        # Define a regex pattern to extract the content of each message
+        message_pattern = re.compile(r"\d{1,2}/\d{1,2}/\d{2,4}, \d{1,2}:\d{1,2}\s[APMapm]{2} - .*?: (.*)")
+        messages = [message_pattern.search(line).group(1) if message_pattern.search(line) else None for line in content]
+        messages = [message for message in messages if message is not None]
 
-    # Tokenize the messages and count the frequency of each word
-    word_freq = Counter()
-    for message in messages:
-        tokens = message.split()
-        word_freq.update(tokens)
+        stop_words = _stop_words.union(portuguese_stop_words)
 
-    # Remove stop words from the frequency counter
-    for stop_word in stop_words:
-        if stop_word in word_freq:
-            del word_freq[stop_word]
+        # Tokenize the messages and count the frequency of each word
+        word_freq = Counter()
+        for message in messages:
+            tokens = message.split()
+            word_freq.update(tokens)
 
-    # Extract the top N words for plotting
-    top_words_data = word_freq.most_common(top_words)
-    words, counts = zip(*top_words_data)
+        # Remove stop words from the frequency counter
+        for stop_word in stop_words:
+            if stop_word in word_freq:
+                del word_freq[stop_word]
 
-    # Plotting the data
-    plt.figure(figsize=(15, 8))
-    plt.barh(words, counts, color='skyblue')
-    plt.xlabel('Frequency')
-    plt.ylabel('Words')
-    plt.title(f"Top {top_words} Frequently Used Words")
-    plt.gca().invert_yaxis()
+        # Extract the top N words for plotting
+        top_words_data = word_freq.most_common(top_words)
+        words, counts = zip(*top_words_data)
 
-    # Save the plot to a temporary file
-    temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".png")
-    plt.savefig(temp_file.name, format='png')
-    plt.close()
+        # Plotting the data
+        plt.figure(figsize=(15, 8))
+        plt.barh(words, counts, color='skyblue')
+        plt.xlabel('Frequency')
+        plt.ylabel('Words')
+        plt.title(f"Top {top_words} Frequently Used Words")
+        plt.gca().invert_yaxis()
 
-    # Send the saved image file as the response
-    return send_file(temp_file.name, mimetype='image/png')
+        # Save the plot to a temporary file
+        temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".png")
+        plt.savefig(temp_file.name, format='png')
+        plt.close()
+
+        # Send the saved image file as the response
+        return send_file(temp_file.name, mimetype='image/png')
+
+    except Exception as e:
+        print(f"An error occurred: {e}")
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+    else:
+        # If no other return has been reached, provide a default response
+        print("No processing occurred, returning default response")
+        return jsonify({'status': 'error', 'message': 'No processing occurred'}), 500
 
 
 @app.route('/whatsapp/message/wordcloud', methods=['POST'])
@@ -1112,14 +1487,28 @@ def plot_cleaned_wordcloud():
     if 'file' not in request.files:
         return 'No file part', 400
     file = request.files['file']
-
     if file.filename == '':
         return 'No selected file', 400
+    if not allowed_file(file.filename):
+        print("File type not allowed")
+        return 'File type not allowed', 400
 
-    if file:
-        # 1. Read the content
-        _content = file.read().decode('utf-8').splitlines()
-        content = preprocess_content(_content, remove_words)
+    try:
+
+        if zipfile.is_zipfile(file):
+            # print("Processing zip file")
+            with zipfile.ZipFile(file) as z:
+                txt_file = next((f for f in z.namelist() if f.lower().endswith('.txt')), None)
+                if txt_file is None:
+                    # print("No txt file found in the zip")
+                    return 'No txt file found in the zip', 400
+                with z.open(txt_file) as f:
+                    content = preprocess_content(decode_file(f))
+        else:
+            # print("Processing regular txt file")
+            file.seek(0)  # Reset pointer to the beginning of the file
+            _content = file.read().decode('utf-8').splitlines()
+            content = preprocess_content(_content)
 
         # Regular expression to extract the message content
         message_pattern = re.compile(r"\d{1,2}/\d{1,2}/\d{2,4}, \d{1,2}:\d{1,2}\s[APMapm]{2} - .*?: (.*)")
@@ -1161,7 +1550,13 @@ def plot_cleaned_wordcloud():
         # Return the saved image file as the response
         return send_file(temp_file.name, mimetype='image/png')
 
-    return "Error processing the file", 500
+    except Exception as e:
+        print(f"An error occurred: {e}")
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+    else:
+        # If no other return has been reached, provide a default response
+        print("No processing occurred, returning default response")
+        return jsonify({'status': 'error', 'message': 'No processing occurred'}), 500
 
 @app.route('/whatsapp/message/lenghiest/top/<int:top_contributors>', methods=['POST'])
 def plot_lengthiest_messages_pie_chart(top_contributors):
@@ -1175,49 +1570,73 @@ def plot_lengthiest_messages_pie_chart(top_contributors):
     file = request.files['file']
     if file.filename == '':
         return 'No selected file', 400
+    if not allowed_file(file.filename):
+        print("File type not allowed")
+        return 'File type not allowed', 400
 
-    # Read the content of the uploaded file
-    _content = file.read().decode('utf-8').splitlines()
-    content = preprocess_content(_content, remove_words)
+    try:
 
-    # Define a regex pattern to extract participant names and their messages
-    message_pattern = re.compile(r"\d{1,2}/\d{1,2}/\d{2,4}, \d{1,2}:\d{1,2}\s[APMapm]{2} - (.*?): (.*)")
+        if zipfile.is_zipfile(file):
+            # print("Processing zip file")
+            with zipfile.ZipFile(file) as z:
+                txt_file = next((f for f in z.namelist() if f.lower().endswith('.txt')), None)
+                if txt_file is None:
+                    # print("No txt file found in the zip")
+                    return 'No txt file found in the zip', 400
+                with z.open(txt_file) as f:
+                    content = preprocess_content(decode_file(f))
+        else:
+            # print("Processing regular txt file")
+            file.seek(0)  # Reset pointer to the beginning of the file
+            _content = file.read().decode('utf-8').splitlines()
+            content = preprocess_content(_content)
 
-    # Initialize dictionaries to track total message length and message count for each participant
-    total_message_lengths = defaultdict(int)
-    message_counts_by_user = defaultdict(int)
+        # Define a regex pattern to extract participant names and their messages
+        message_pattern = re.compile(r"\d{1,2}/\d{1,2}/\d{2,4}, \d{1,2}:\d{1,2}\s[APMapm]{2} - (.*?): (.*)")
 
-    # Iterate over each line to extract participant names and their messages, then update the dictionaries
-    for line in content:
-        match = message_pattern.search(line)
-        if match:
-            name, message = match.groups()
-            total_message_lengths[name] += len(message)
-            message_counts_by_user[name] += 1
+        # Initialize dictionaries to track total message length and message count for each participant
+        total_message_lengths = defaultdict(int)
+        message_counts_by_user = defaultdict(int)
 
-    # Compute the average message length for each participant
-    average_message_lengths = {name: total_message_lengths[name] / message_counts_by_user[name] for name in total_message_lengths}
+        # Iterate over each line to extract participant names and their messages, then update the dictionaries
+        for line in content:
+            match = message_pattern.search(line)
+            if match:
+                name, message = match.groups()
+                total_message_lengths[name] += len(message)
+                message_counts_by_user[name] += 1
 
-    # Sort the participants based on average message length and consider only the top `top_contributors`
-    sorted_average_lengths = sorted(average_message_lengths.items(), key=lambda x: x[1], reverse=True)[:top_contributors]
+        # Compute the average message length for each participant
+        average_message_lengths = {name: total_message_lengths[name] / message_counts_by_user[name] for name in total_message_lengths}
 
-    # Extract names and average lengths for plotting
-    top_names = [item[0] for item in sorted_average_lengths]
-    top_average_lengths = [item[1] for item in sorted_average_lengths]
+        # Sort the participants based on average message length and consider only the top `top_contributors`
+        sorted_average_lengths = sorted(average_message_lengths.items(), key=lambda x: x[1], reverse=True)[:top_contributors]
 
-    # Create a pie chart to display the top contributors by average message length
-    plt.figure(figsize=(12, 8))
-    plt.pie(top_average_lengths, labels=top_names, autopct='%1.1f%%', startangle=90, colors=plt.cm.Paired.colors)
-    plt.title(f"Top {top_contributors} Contributors by Average Message Length")
-    plt.axis('equal')
+        # Extract names and average lengths for plotting
+        top_names = [item[0] for item in sorted_average_lengths]
+        top_average_lengths = [item[1] for item in sorted_average_lengths]
 
-    # Save the plot to a temporary file
-    temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".png")
-    plt.savefig(temp_file.name, format='png')
-    plt.close()
+        # Create a pie chart to display the top contributors by average message length
+        plt.figure(figsize=(12, 8))
+        plt.pie(top_average_lengths, labels=top_names, autopct='%1.1f%%', startangle=90, colors=plt.cm.Paired.colors)
+        plt.title(f"Top {top_contributors} Contributors by Average Message Length")
+        plt.axis('equal')
 
-    # Send the saved image file as the response
-    return send_file(temp_file.name, mimetype='image/png')
+        # Save the plot to a temporary file
+        temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".png")
+        plt.savefig(temp_file.name, format='png')
+        plt.close()
+
+        # Send the saved image file as the response
+        return send_file(temp_file.name, mimetype='image/png')
+
+    except Exception as e:
+        print(f"An error occurred: {e}")
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+    else:
+        # If no other return has been reached, provide a default response
+        print("No processing occurred, returning default response")
+        return jsonify({'status': 'error', 'message': 'No processing occurred'}), 500
 
 
 @app.route('/whatsapp/message/sentiment/distribution', methods=['POST'])
@@ -1232,45 +1651,69 @@ def plot_sentiment_distribution():
     file = request.files['file']
     if file.filename == '':
         return 'No selected file', 400
+    if not allowed_file(file.filename):
+        print("File type not allowed")
+        return 'File type not allowed', 400
 
-    # Read the content of the uploaded file
-    _content = file.read().decode('utf-8').splitlines()
-    content = preprocess_content(_content, remove_words)
+    try:
 
-    # Define a regex pattern to extract the content of each message
-    message_pattern = re.compile(r"\d{1,2}/\d{1,2}/\d{2,4}, \d{1,2}:\d{1,2}\s[APMapm]{2} - .*?: (.*)")
-    messages = [message_pattern.search(line).group(1) if message_pattern.search(line) else None for line in content]
-    messages = [message for message in messages if message is not None]
-
-    # Initialize the VADER sentiment analyzer
-    analyzer = SentimentIntensityAnalyzer()
-
-    # Categorize each message's sentiment
-    sentiments = {"positive": 0, "neutral": 0, "negative": 0}
-    for message in messages:
-        vs = analyzer.polarity_scores(message)
-        if vs['compound'] >= 0.05:
-            sentiments['positive'] += 1
-        elif vs['compound'] <= -0.05:
-            sentiments['negative'] += 1
+        if zipfile.is_zipfile(file):
+            # print("Processing zip file")
+            with zipfile.ZipFile(file) as z:
+                txt_file = next((f for f in z.namelist() if f.lower().endswith('.txt')), None)
+                if txt_file is None:
+                    # print("No txt file found in the zip")
+                    return 'No txt file found in the zip', 400
+                with z.open(txt_file) as f:
+                    content = preprocess_content(decode_file(f))
         else:
-            sentiments['neutral'] += 1
+            # print("Processing regular txt file")
+            file.seek(0)  # Reset pointer to the beginning of the file
+            _content = file.read().decode('utf-8').splitlines()
+            content = preprocess_content(_content)
 
-    # Create a pie chart to display the sentiment distribution
-    plt.figure(figsize=(12, 8))
-    labels = list(sentiments.keys())
-    sizes = list(sentiments.values())
-    plt.pie(sizes, labels=labels, autopct='%1.1f%%', startangle=90, colors=plt.cm.Paired.colors)
-    plt.title("Sentiment Distribution of Messages")
-    plt.axis('equal')
+        # Define a regex pattern to extract the content of each message
+        message_pattern = re.compile(r"\d{1,2}/\d{1,2}/\d{2,4}, \d{1,2}:\d{1,2}\s[APMapm]{2} - .*?: (.*)")
+        messages = [message_pattern.search(line).group(1) if message_pattern.search(line) else None for line in content]
+        messages = [message for message in messages if message is not None]
 
-    # Save the plot to a temporary file
-    temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".png")
-    plt.savefig(temp_file.name, format='png')
-    plt.close()
+        # Initialize the VADER sentiment analyzer
+        analyzer = SentimentIntensityAnalyzer()
 
-    # Send the saved image file as the response
-    return send_file(temp_file.name, mimetype='image/png')
+        # Categorize each message's sentiment
+        sentiments = {"positive": 0, "neutral": 0, "negative": 0}
+        for message in messages:
+            vs = analyzer.polarity_scores(message)
+            if vs['compound'] >= 0.05:
+                sentiments['positive'] += 1
+            elif vs['compound'] <= -0.05:
+                sentiments['negative'] += 1
+            else:
+                sentiments['neutral'] += 1
+
+        # Create a pie chart to display the sentiment distribution
+        plt.figure(figsize=(12, 8))
+        labels = list(sentiments.keys())
+        sizes = list(sentiments.values())
+        plt.pie(sizes, labels=labels, autopct='%1.1f%%', startangle=90, colors=plt.cm.Paired.colors)
+        plt.title("Sentiment Distribution of Messages")
+        plt.axis('equal')
+
+        # Save the plot to a temporary file
+        temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".png")
+        plt.savefig(temp_file.name, format='png')
+        plt.close()
+
+        # Send the saved image file as the response
+        return send_file(temp_file.name, mimetype='image/png')
+
+    except Exception as e:
+        print(f"An error occurred: {e}")
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+    else:
+        # If no other return has been reached, provide a default response
+        print("No processing occurred, returning default response")
+        return jsonify({'status': 'error', 'message': 'No processing occurred'}), 500
 
 
 @app.route('/whatsapp/message/heatmap', methods=['POST'])
@@ -1283,14 +1726,28 @@ def plot_hourly_heatmap():
     if 'file' not in request.files:
         return 'No file part', 400
     file = request.files['file']
-
     if file.filename == '':
         return 'No selected file', 400
+    if not allowed_file(file.filename):
+        print("File type not allowed")
+        return 'File type not allowed', 400
 
-    if file:
-        # 1. Read the content
-        _content = file.read().decode('utf-8').splitlines()
-        content = preprocess_content(_content, remove_words)
+    try:
+
+        if zipfile.is_zipfile(file):
+            # print("Processing zip file")
+            with zipfile.ZipFile(file) as z:
+                txt_file = next((f for f in z.namelist() if f.lower().endswith('.txt')), None)
+                if txt_file is None:
+                    # print("No txt file found in the zip")
+                    return 'No txt file found in the zip', 400
+                with z.open(txt_file) as f:
+                    content = preprocess_content(decode_file(f))
+        else:
+            # print("Processing regular txt file")
+            file.seek(0)  # Reset pointer to the beginning of the file
+            _content = file.read().decode('utf-8').splitlines()
+            content = preprocess_content(_content)
 
         # Extract hour along with the AM/PM marker using regex
         hour_ampm_pattern = re.compile(r"\d{1,2}/\d{1,2}/\d{2,4}, (\d{1,2}:\d{1,2}\s[APMapm]{2}) - .*?:")
@@ -1341,6 +1798,14 @@ def plot_hourly_heatmap():
         # Return the saved image file as the response
         return send_file(temp_file.name, mimetype='image/png')
 
+    except Exception as e:
+        print(f"An error occurred: {e}")
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+    else:
+        # If no other return has been reached, provide a default response
+        print("No processing occurred, returning default response")
+        return jsonify({'status': 'error', 'message': 'No processing occurred'}), 500
+
 @app.route('/whatsapp/message/usercount', methods=['POST'])
 def user_message_count():
     # origin = request.headers.get('Origin') or request.headers.get('Referer')
@@ -1354,14 +1819,28 @@ def user_message_count():
     if 'file' not in request.files:
         return 'No file part', 400
     file = request.files['file']
-
     if file.filename == '':
         return 'No selected file', 400
+    if not allowed_file(file.filename):
+        print("File type not allowed")
+        return 'File type not allowed', 400
 
-    if file:
-        # 1. Read the content
-        _content = file.read().decode('utf-8').splitlines()
-        content = preprocess_content(_content, remove_words)
+    try:
+
+        if zipfile.is_zipfile(file):
+            # print("Processing zip file")
+            with zipfile.ZipFile(file) as z:
+                txt_file = next((f for f in z.namelist() if f.lower().endswith('.txt')), None)
+                if txt_file is None:
+                    # print("No txt file found in the zip")
+                    return 'No txt file found in the zip', 400
+                with z.open(txt_file) as f:
+                    content = preprocess_content(decode_file(f))
+        else:
+            # print("Processing regular txt file")
+            file.seek(0)  # Reset pointer to the beginning of the file
+            _content = file.read().decode('utf-8').splitlines()
+            content = preprocess_content(_content)
 
         # Regular expression to extract the name pattern from a typical line
         name_pattern = re.compile(r"\d{1,2}/\d{1,2}/\d{2,4}, \d{1,2}:\d{1,2}\s[APMapm]{2} - (.*?):")
@@ -1403,6 +1882,14 @@ def user_message_count():
         # Send the saved image file as the response
         return send_file(temp_file.name, mimetype='image/png')
 
+    except Exception as e:
+        print(f"An error occurred: {e}")
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+    else:
+        # If no other return has been reached, provide a default response
+        print("No processing occurred, returning default response")
+        return jsonify({'status': 'error', 'message': 'No processing occurred'}), 500
+
 
 @app.route('/whatsapp/message/activeusers/<int:num_users>', methods=['POST'])
 def most_active_users(num_users):
@@ -1416,44 +1903,68 @@ def most_active_users(num_users):
     file = request.files['file']
     if file.filename == '':
         return 'No selected file', 400
+    if not allowed_file(file.filename):
+        print("File type not allowed")
+        return 'File type not allowed', 400
 
-    # Read the uploaded file's content
-    _content = file.read().decode('utf-8').splitlines()
-    content = preprocess_content(_content, remove_words)
+    try:
 
-    # Define a regex pattern to extract participant names from each message
-    name_pattern = re.compile(r"\d{1,2}/\d{1,2}/\d{2,4}, \d{1,2}:\d{1,2}\s[APMapm]{2} - (.*?):")
+        if zipfile.is_zipfile(file):
+            # print("Processing zip file")
+            with zipfile.ZipFile(file) as z:
+                txt_file = next((f for f in z.namelist() if f.lower().endswith('.txt')), None)
+                if txt_file is None:
+                    # print("No txt file found in the zip")
+                    return 'No txt file found in the zip', 400
+                with z.open(txt_file) as f:
+                    content = preprocess_content(decode_file(f))
+        else:
+            # print("Processing regular txt file")
+            file.seek(0)  # Reset pointer to the beginning of the file
+            _content = file.read().decode('utf-8').splitlines()
+            content = preprocess_content(_content)
 
-    # Initialize a dictionary to count messages for each participant
-    message_counts = defaultdict(int)
+        # Define a regex pattern to extract participant names from each message
+        name_pattern = re.compile(r"\d{1,2}/\d{1,2}/\d{2,4}, \d{1,2}:\d{1,2}\s[APMapm]{2} - (.*?):")
 
-    # Iterate over each line to extract participant names and increment their message count
-    for line in content:
-        match = name_pattern.search(line)
-        if match:
-            name = match.group(1)
-            message_counts[name] += 1
+        # Initialize a dictionary to count messages for each participant
+        message_counts = defaultdict(int)
 
-    # Sort participants based on message count and consider only top `num_users`
-    sorted_counts = sorted(message_counts.items(), key=lambda x: x[1], reverse=True)[:num_users]
-    top_names = [item[0] for item in sorted_counts]
-    top_message_counts = [item[1] for item in sorted_counts]
+        # Iterate over each line to extract participant names and increment their message count
+        for line in content:
+            match = name_pattern.search(line)
+            if match:
+                name = match.group(1)
+                message_counts[name] += 1
 
-    # Create a bar chart to display the most active users
-    plt.figure(figsize=(15, 8))
-    sns.barplot(x=top_message_counts, y=top_names, palette="viridis")
-    plt.title(f'Most Active {num_users} Users')
-    plt.xlabel('Message Count')
-    plt.ylabel('User')
+        # Sort participants based on message count and consider only top `num_users`
+        sorted_counts = sorted(message_counts.items(), key=lambda x: x[1], reverse=True)[:num_users]
+        top_names = [item[0] for item in sorted_counts]
+        top_message_counts = [item[1] for item in sorted_counts]
 
-    # Save the plot to a temporary file
-    temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".png")
-    plt.savefig(temp_file.name, format='png')
-    plt.close()
+        # Create a bar chart to display the most active users
+        plt.figure(figsize=(15, 8))
+        sns.barplot(x=top_message_counts, y=top_names, palette="viridis")
+        plt.title(f'Most Active {num_users} Users')
+        plt.xlabel('Message Count')
+        plt.ylabel('User')
 
-    # Send the saved image file as the response
-    return send_file(temp_file.name, mimetype='image/png')
+        # Save the plot to a temporary file
+        temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".png")
+        plt.savefig(temp_file.name, format='png')
+        plt.close()
+
+        # Send the saved image file as the response
+        return send_file(temp_file.name, mimetype='image/png')
+
+    except Exception as e:
+        print(f"An error occurred: {e}")
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+    else:
+        # If no other return has been reached, provide a default response
+        print("No processing occurred, returning default response")
+        return jsonify({'status': 'error', 'message': 'No processing occurred'}), 500
 
 
 if __name__ == '__main__':
-    app.run(debug=False, host='0.0.0.0', port=5000)
+    app.run(debug=True, host='0.0.0.0', port=5000)
