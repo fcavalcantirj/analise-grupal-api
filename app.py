@@ -6,6 +6,7 @@ import os
 import base64
 import requests
 import logging
+import cloudinary
 from collections import defaultdict
 from collections import Counter
 from flask import Flask, request, send_file, jsonify, abort
@@ -376,12 +377,14 @@ def home():
 def healthcheck():
     return jsonify(success=True), 200
 
+
 @app.route('/upload_to_imgur', methods=['POST'])
 def upload_to_imgur():
     imgur_client_id = os.getenv('IMGUR_CLIENT_ID')
     if not imgur_client_id:
         logging.error('IMGUR_CLIENT_ID environment variable not set.')
-        return jsonify({'error': 'IMGUR_CLIENT_ID environment variable not set'}), 500
+        # Attempt Cloudinary upload instead
+        return upload_to_cloudinary()
 
     if 'image' not in request.files:
         logging.error('No image part in request.')
@@ -408,15 +411,63 @@ def upload_to_imgur():
             logging.info(f'Image successfully uploaded to Imgur: {link}')
             return jsonify({'link': link})
         else:
-            logging.error(f'Upload failed with status code {response.status_code}: {response.json()}')
-            return jsonify({'error': 'Upload failed', 'response': response.json()}), 500
+            logging.warning(f'Imgur upload failed, attempting Cloudinary upload.')
+            # Attempt Cloudinary upload instead
+            return upload_to_cloudinary()
 
     except requests.RequestException as e:
-        logging.exception('Request failed.')
-        return jsonify({'error': 'Upload failed', 'message': str(e)}), 500
+        logging.exception('Request failed with Imgur.')
+        # Attempt Cloudinary upload instead
+        return upload_to_cloudinary()
     except Exception as e:
         logging.exception('An unexpected error occurred.')
         return jsonify({'error': 'An unexpected error occurred', 'message': str(e)}), 500
+
+
+def upload_to_cloudinary():
+    CLOUDINARY_CLOUD_NAME = os.getenv('CLOUDINARY_CLOUD_NAME')
+    CLOUDINARY_UPLOAD_PRESET = os.getenv('CLOUDINARY_UPLOAD_PRESET')
+
+    # Check if all required Cloudinary configuration variables are set
+    if not all([CLOUDINARY_CLOUD_NAME, CLOUDINARY_UPLOAD_PRESET]):
+        logging.error('Cloudinary environment variables not set.')
+        return jsonify({'error': 'Image upload service not available'}), 500
+
+    # Get the file from the request
+    file = request.files['image']
+    if file.filename == '':
+        logging.error('No selected image.')
+        return jsonify({'error': 'No selected image'}), 400
+
+    try:
+        # Ensure the file pointer is at the start
+        file.seek(0)
+        # Read the image data
+        image_data = file.read()
+
+        # Send the POST request to Cloudinary
+        response = requests.post(
+            f'https://api.cloudinary.com/v1_1/{CLOUDINARY_CLOUD_NAME}/image/upload',
+            files={'file': (file.filename, image_data)},  # Send file with filename
+            data={'upload_preset': CLOUDINARY_UPLOAD_PRESET}
+        )
+
+        # Check if the upload was successful
+        if response.status_code == 200:
+            link = response.json().get('secure_url')
+            logging.info(f'Image successfully uploaded to Cloudinary: {link}')
+            return jsonify({'link': link})
+        else:
+            logging.error(f'Cloudinary upload failed with status code {response.status_code}: {response.content}')
+            return jsonify({'error': 'Upload failed', 'response': response.json()}), response.status_code
+
+    except requests.RequestException as e:
+        logging.exception('Request failed with Cloudinary.')
+        return jsonify({'error': 'Upload failed', 'message': str(e)}), 500
+    except Exception as e:
+        logging.exception('An unexpected error occurred with Cloudinary.')
+        return jsonify({'error': 'An unexpected error occurred', 'message': str(e)}), 500
+
 
 
 def is_drinking_invitation(message):
