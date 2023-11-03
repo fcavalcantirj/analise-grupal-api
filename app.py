@@ -352,10 +352,8 @@ def allowed_file(filename):
 
 def decode_file(file_stream):
     try:
-        print("dec.1")
         return file_stream.read().decode('utf-8').splitlines()
     except UnicodeDecodeError:
-        print("dec.2")
         file_stream.seek(0)  # Go back to the beginning of the file
         raw_data = file_stream.read()
         encoding = chardet.detect(raw_data)['encoding']
