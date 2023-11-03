@@ -523,7 +523,7 @@ def plot_avg_sentiment_per_person():
             _content = file.read().decode('utf-8').splitlines()
             content = preprocess_content(_content)
 
-        print(f"@@@@@@@ Content preview: {content[:5]}")
+        # print(f"@@@@@@@ Content preview: {content[:5]}")
             
         # Regular expression to extract timestamp, sender and messages
         message_pattern = re.compile(r"\d{1,2}/\d{1,2}/\d{2,4}, \d{1,2}:\d{1,2}\s[APMapm]{2} - (.*?): (.*)")
