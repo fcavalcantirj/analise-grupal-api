@@ -36,7 +36,10 @@ def preprocess_content(content, words_to_remove=['Vic']):
         re.compile(r'(\d{1,2}/\d{1,2}/\d{2,4}), (\d{1,2}:\d{1,2})\u202F(AM|PM) - (.*?): (.*)', re.IGNORECASE),
         re.compile(r'(\d{1,2}/\d{1,2}/\d{2,4}) (\d{1,2}:\d{1,2}:\d{1,2}) - (.*?): \u200e?(.*)', re.IGNORECASE),
         re.compile(r'(\d{1,2}/\d{1,2}/\d{2,4}) (\d{1,2}:\d{1,2}) - (.*?): \u200e?(.*)', re.IGNORECASE),
-        re.compile(r'\[(\d{1,2}/\d{1,2}/\d{2,4}) (\d{1,2}:\d{1,2}:\d{1,2})\] (.*?): \u200e?(.*)', re.IGNORECASE)
+        re.compile(r'\[(\d{1,2}/\d{1,2}/\d{2,4}) (\d{1,2}:\d{1,2}:\d{1,2})\] (.*?): \u200e?(.*)', re.IGNORECASE),
+        re.compile(r'(\d{1,2}/\d{1,2}/\d{2,4}) (\d{1,2}:\d{1,2}) \| (.*?) \| (.*)', re.IGNORECASE),
+        re.compile(r'\[(\d{1,2}/\d{1,2}/\d{2,4}) (\d{1,2}:\d{1,2}:\d{1,2})\] (.*?): \u200e?(.*)', re.IGNORECASE),
+        re.compile(r'(\d{1,2}/\d{1,2}/\d{1,2}) (\d{1,2}:\d{1,2}) - (.*?): \u200e?(.*)', re.IGNORECASE)
     ]
     
     for line in content:
@@ -64,6 +67,8 @@ def preprocess_content(content, words_to_remove=['Vic']):
 
 # Sample data lines for testing
 sample_data = [
+    "09/03/22 18:37 : Tiago Mendes Apu : Não dá pra colocar GNV?",
+    "09/03/2022 18:37 | Tiago Mendes Apu | Não dá pra colocar GNV?",
     "09/03/2022 18:37 - Tiago Mendes Apu: Não dá pra colocar GNV?",
     "23/03/2018 00:31 - Vic Wolk: Tão no bar ainda??",
     "04/10/2023 06:40 - +55 61 9425-0939: 😭😭😭",

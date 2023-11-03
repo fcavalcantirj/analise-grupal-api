@@ -5,6 +5,7 @@ import re
 import os
 import base64
 import requests
+import logging
 from collections import defaultdict
 from collections import Counter
 from flask import Flask, request, send_file, jsonify, abort
@@ -29,6 +30,8 @@ import pyLDAvis.gensim_models as gensimvis
 import pyLDAvis
 matplotlib.use('Agg')  # Set the backend to 'Agg'
 import matplotlib.pyplot as plt
+
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 ALLOWED_EXTENSIONS = {'txt', 'zip', 'zipfile'}
 ALLOWED_HOSTS = ["https://analisegrupal.com.br", "https://api.analisegrupal.com.br"]
@@ -136,6 +139,68 @@ def determine_patterns(first_line):
     message_pattern = r"- (.*?): (.*)"
     return date_pattern, message_pattern
 
+def call_openai_api(prompt):
+    api_key = os.getenv('CHATGPT_ABECMED_APIKEY')
+    if not api_key:
+        logging.error("No API key found. Please set the CHATGPT_ABECMED_APIKEY environment variable.")
+        raise ValueError('No API key found. Please set the CHATGPT_ABECMED_APIKEY environment variable.')
+
+    headers = {
+        'Authorization': f'Bearer {api_key}',
+        'Content-Type': 'application/json',
+    }
+
+    data = {
+        'prompt': prompt,
+        'max_tokens': 150,
+        'temperature': 0.5,
+    }
+
+    response = requests.post('https://api.openai.com/v1/engines/text-davinci-003/completions', json=data, headers=headers)
+    if response.status_code == 200:
+        logging.info("OpenAI API call successful.")
+        return response.json()["choices"][0]["text"].strip()
+    else:
+        logging.error(f"Failed to call OpenAI API: {response.status_code} {response.text}")
+        return None
+
+def generate_pattern(unmatched_line, patterns, depth=0, max_depth=2):
+    if depth > max_depth:
+        logging.warning("Maximum recursion depth reached without finding a match.")
+        return None
+
+    logging.info("Attempting to match the line with existing patterns.")
+    for pattern in patterns:
+        if re.match(pattern, unmatched_line):
+            logging.info(f"Existing pattern matched: {pattern.pattern}")
+            return pattern.pattern
+
+    logging.info("No existing pattern matched. Asking OpenAI API for a suggestion.")
+    prompt = f"Generate a regex pattern that matches the following line:\n'{unmatched_line}'\n\nExisting patterns:\n"
+    for p in patterns:
+        prompt += f"{p.pattern}\n"
+    prompt += "\nSuggested pattern:"
+
+    suggested_pattern = call_openai_api(prompt)
+    if suggested_pattern:
+        logging.info(f"OpenAI API suggested a pattern: {suggested_pattern}")
+        try:
+            compiled_pattern = re.compile(suggested_pattern, re.IGNORECASE)
+            if compiled_pattern.match(unmatched_line):
+                logging.info(f"Suggested pattern successfully matched the line: {suggested_pattern}")
+                return suggested_pattern
+            else:
+                logging.warning(f"Suggested pattern did not match the line: {suggested_pattern}")
+                # Recurse with increased depth
+                return generate_pattern(unmatched_line, patterns, depth=depth + 1)
+        except re.error as e:
+            logging.error(f"Generated pattern is not a valid regex: {e}")
+            # Recurse with increased depth
+            return generate_pattern(unmatched_line, patterns, depth=depth + 1)
+    else:
+        logging.error("OpenAI API did not provide a suggested pattern.")
+        return None
+
 def format_datetime(date, time):
     # Split the date into day, month, and year
     day, month, year = map(int, date.split('/'))
@@ -162,7 +227,75 @@ def format_datetime(date, time):
     
     return f"{formatted_date}, {formatted_time}"
 
-def preprocess_content(content, words_to_remove=['Vic']):
+def preprocess_content_new(content, words_to_remove=[]):
+    extracted_content = []
+    patterns = [
+        re.compile(r'\[(\d{1,2}/\d{1,2}/\d{2,4}), (\d{1,2}:\d{1,2}(:\d{1,2})?)\] (.*?): (.*)', re.IGNORECASE),
+        re.compile(r'(\d{1,2}/\d{1,2}/\d{2,4}), (\d{1,2}:\d{1,2}(:\d{1,2})?) ?(AM|PM)? - (.*?): (.*)', re.IGNORECASE),
+        re.compile(r'(\d{1,2}/\d{1,2}/\d{2,4}), (\d{1,2}:\d{1,2})\u202F(AM|PM) - (.*?): (.*)', re.IGNORECASE),
+        re.compile(r'(\d{1,2}/\d{1,2}/\d{2,4}) (\d{1,2}:\d{1,2}:\d{1,2}) - (.*?): \u200e?(.*)', re.IGNORECASE),
+        re.compile(r'(\d{1,2}/\d{1,2}/\d{2,4}) (\d{1,2}:\d{1,2}) - (.*?): \u200e?(.*)', re.IGNORECASE),
+        re.compile(r'\[(\d{1,2}/\d{1,2}/\d{2,4}) (\d{1,2}:\d{1,2}:\d{1,2})\] (.*?): \u200e?(.*)', re.IGNORECASE),
+        re.compile(r'(\d{1,2}/\d{1,2}/\d{2,4}) (\d{1,2}:\d{1,2}) \| (.*?) \| (.*)', re.IGNORECASE),
+        re.compile(r'(\d{1,2}/\d{1,2}/\d{2,4}) (\d{1,2}:\d{1,2}) \| (.*?) \- (.*)', re.IGNORECASE)
+    ]
+
+    for line in content:
+        line = line.replace('"', "'")
+        print(line)
+        matched = False
+        for pattern in patterns:
+            match = pattern.search(line)
+            if match:
+                date, time = match.groups()[0], match.groups()[1]
+                
+                # Format the datetime to ensure it's in the desired format
+                formatted_datetime = format_datetime(date, time)
+                
+                person = match.groups()[-2]
+                message_content = match.groups()[-1]
+
+                _str = formatted_datetime + ' - ' + person.strip() + ": " + message_content.strip()
+                for word in words_to_remove:
+                    _str = _str.replace(word, "")
+                extracted_content.append(_str)
+
+                matched = True
+                break
+        
+        if not matched:
+            # No existing pattern matched, try to generate a new one
+            new_pattern = generate_pattern(line, patterns)
+            if new_pattern:
+                # Compile the new pattern and add it to the list
+                compiled_new_pattern = re.compile(new_pattern, re.IGNORECASE)
+                patterns.append(compiled_new_pattern)
+                
+                # Now that we have a new pattern, retry matching the line
+                match = compiled_new_pattern.search(line)
+                if match:
+
+                    date, time = match.groups()[0], match.groups()[1]
+                    # Format the datetime to ensure it's in the desired format
+                    formatted_datetime = format_datetime(date, time)
+                    
+                    person = match.groups()[-2]
+                    message_content = match.groups()[-1]
+
+                    _str = formatted_datetime + ' - ' + person.strip() + ": " + message_content.strip()
+                    for word in words_to_remove:
+                        _str = _str.replace(word, "")
+                    extracted_content.append(_str)
+                    break
+                else:
+                    logging.warning(f"New pattern did not match the line: {line}")
+            else:
+                logging.error(f"Could not generate a new pattern for the line: {line}")
+
+    return extracted_content
+
+
+def preprocess_content(content, words_to_remove=[]):
     extracted_content = []
 
     # Define patterns to handle various date-time and message structures
@@ -249,29 +382,43 @@ def healthcheck():
 def upload_to_imgur():
     imgur_client_id = os.getenv('IMGUR_CLIENT_ID')
     if not imgur_client_id:
+        logging.error('IMGUR_CLIENT_ID environment variable not set.')
         return jsonify({'error': 'IMGUR_CLIENT_ID environment variable not set'}), 500
+
     if 'image' not in request.files:
+        logging.error('No image part in request.')
         return jsonify({'error': 'No image part'}), 400
-    
+
     file = request.files['image']
     if file.filename == '':
+        logging.error('No selected image.')
         return jsonify({'error': 'No selected image'}), 400
-    
-    # Read the image and encode it in base64
-    image_b64 = base64.b64encode(file.read())
 
-    headers = {'Authorization': f'Client-ID {imgur_client_id}'}
-    data = {'image': image_b64, 'type': 'base64'}
+    try:
+        # Read the image and encode it in base64
+        image_b64 = base64.b64encode(file.read()).decode('utf-8')
 
-    # Send the POST request to Imgur
-    response = requests.post('https://api.imgur.com/3/image', headers=headers, data=data)
-    
-    if response.status_code == 200:
-        # Extract the link from the response data
-        link = response.json()['data']['link']
-        return jsonify({'link': link})
-    else:
-        return jsonify({'error': 'Upload failed', 'response': response.json()}), 500
+        headers = {'Authorization': f'Client-ID {imgur_client_id}'}
+        data = {'image': image_b64, 'type': 'base64'}
+
+        # Send the POST request to Imgur
+        response = requests.post('https://api.imgur.com/3/image', headers=headers, data=data)
+
+        if response.status_code == 200:
+            # Extract the link from the response data
+            link = response.json()['data']['link']
+            logging.info(f'Image successfully uploaded to Imgur: {link}')
+            return jsonify({'link': link})
+        else:
+            logging.error(f'Upload failed with status code {response.status_code}: {response.json()}')
+            return jsonify({'error': 'Upload failed', 'response': response.json()}), 500
+
+    except requests.RequestException as e:
+        logging.exception('Request failed.')
+        return jsonify({'error': 'Upload failed', 'message': str(e)}), 500
+    except Exception as e:
+        logging.exception('An unexpected error occurred.')
+        return jsonify({'error': 'An unexpected error occurred', 'message': str(e)}), 500
 
 
 def is_drinking_invitation(message):
@@ -378,7 +525,7 @@ def plot_avg_sentiment_per_person():
             _content = file.read().decode('utf-8').splitlines()
             content = preprocess_content(_content)
 
-        # print(f"Content preview: {content[:5]}")
+        print(f"@@@@@@@ Content preview: {content[:5]}")
             
         # Regular expression to extract timestamp, sender and messages
         message_pattern = re.compile(r"\d{1,2}/\d{1,2}/\d{2,4}, \d{1,2}:\d{1,2}\s[APMapm]{2} - (.*?): (.*)")
