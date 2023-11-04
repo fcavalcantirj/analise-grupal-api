@@ -112,7 +112,8 @@ remove_words = [
     "omitted", "Media", "Mas", "mas", "q", "O", "E", "mais", "omitted>", "<Media", "media", "Media", "http", 
     "https", "figurinha omitida", "imagem ocultada", "oculto>", "mídia", "[]", "<Aruivo", "apagada", "Mensagem",
     "<", "editada>", ">", "message", "Message", "deleted", "Deleted", "This", "this", "file attached", "attached",
-    "Arquivo oculto", "Arquivo", "oculto"
+    "Arquivo oculto", "Arquivo", "oculto", "vídeo omitido", "imagem ocultada", "ocultada", "imagem", "ocultado áudio",
+    "ocultado", "áudio", "ocultado audio"
 ]
 
 
