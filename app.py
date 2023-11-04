@@ -32,7 +32,7 @@ import pyLDAvis
 matplotlib.use('Agg')  # Set the backend to 'Agg'
 import matplotlib.pyplot as plt
 
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - [%(filename)s:%(lineno)d] - %(message)s')
 
 ALLOWED_EXTENSIONS = {'txt', 'zip', 'zipfile'}
 ALLOWED_HOSTS = ["https://analisegrupal.com.br", "https://api.analisegrupal.com.br"]
@@ -114,11 +114,20 @@ remove_words = [
     "<", "editada>", ">"
 ]
 
+
 def preprocess(text):
-    stop_words = _stop_words.union(portuguese_stop_words)
+    # Convert both lists to sets and then union them
+    temp_set = set(remove_words).union(set(portuguese_stop_words))
+    
+    # Tokenize the text
     tokens = nltk.word_tokenize(text)
-    tokens = [word for word in tokens if word not in stop_words and len(word) > 3]
+    
+    # Filter out tokens in the stop words set and that are greater than 3 characters
+    tokens = [word for word in tokens if word not in temp_set and len(word) > 3]
+    
+    # Lemmatize the remaining tokens
     tokens = [lemma.lemmatize(word) for word in tokens]
+    
     return tokens
 
 def build_lda_model(texts, num_topics=5):
@@ -127,18 +136,6 @@ def build_lda_model(texts, num_topics=5):
     lda_model = LdaModel(corpus, num_topics=num_topics, id2word=dictionary, passes=15)
     return lda_model, corpus, dictionary
 
-def determine_patterns(first_line):
-    if "[" in first_line and "]" in first_line:
-        date_pattern = r"\[.*?\]"
-    elif "," in first_line:
-        date_pattern = r"\d{1,2}/\d{1,2}/\d{2,4}, \d{1,2}:\d{1,2}\s[APMapm]{2}"
-    elif " " in first_line:
-        date_pattern = r"\d{1,2}/\d{1,2}/\d{2,4} \d{1,2}:\d{1,2}:\d{1,2}"
-    else:
-        return None, None
-    
-    message_pattern = r"- (.*?): (.*)"
-    return date_pattern, message_pattern
 
 def call_openai_api(prompt):
     api_key = os.getenv('CHATGPT_ABECMED_APIKEY')
@@ -537,11 +534,11 @@ def topic_modeling():
             return html  # This will directly return the visualization as an HTML page.
 
     except Exception as e:
-        print(f"An error occurred: {e}")
+        logging.exception("An unexpected error occurred.")
         return jsonify({'status': 'error', 'message': str(e)}), 500
     else:
         # If no other return has been reached, provide a default response
-        print("No processing occurred, returning default response")
+        logging.debug("No processing occurred, returning default response")
         return jsonify({'status': 'error', 'message': 'No processing occurred'}), 500
 
 @app.route('/whatsapp/message/avg_sentiment_per_person', methods=['POST'])
@@ -626,11 +623,11 @@ def plot_avg_sentiment_per_person():
         return send_file(temp_file.name, mimetype='image/png')
     
     except Exception as e:
-        print(f"An error occurred: {e}")
+        logging.exception("An unexpected error occurred.")
         return jsonify({'status': 'error', 'message': str(e)}), 500
     else:
         # If no other return has been reached, provide a default response
-        print("No processing occurred, returning default response")
+        logging.debug("No processing occurred, returning default response")
         return jsonify({'status': 'error', 'message': 'No processing occurred'}), 500
 
 
@@ -711,11 +708,11 @@ def plot_message_length_over_time():
         return send_file(temp_file.name, mimetype='image/png')
 
     except Exception as e:
-        print(f"An error occurred: {e}")
+        logging.exception("An unexpected error occurred.")
         return jsonify({'status': 'error', 'message': str(e)}), 500
     else:
         # If no other return has been reached, provide a default response
-        print("No processing occurred, returning default response")
+        logging.debug("No processing occurred, returning default response")
         return jsonify({'status': 'error', 'message': 'No processing occurred'}), 500
 
 @app.route('/whatsapp/message/avg_sentiment_per_person/json', methods=['POST'])
@@ -772,11 +769,11 @@ def avg_sentiment_per_person_json():
         return jsonify(avg_sentiments)
 
     except Exception as e:
-        print(f"An error occurred: {e}")
+        logging.exception("An unexpected error occurred.")
         return jsonify({'status': 'error', 'message': str(e)}), 500
     else:
         # If no other return has been reached, provide a default response
-        print("No processing occurred, returning default response")
+        logging.debug("No processing occurred, returning default response")
         return jsonify({'status': 'error', 'message': 'No processing occurred'}), 500
 
 
@@ -856,11 +853,11 @@ def plot_sentiment_over_time():
         return send_file(temp_file.name, mimetype='image/png')
 
     except Exception as e:
-        print(f"An error occurred: {e}")
+        logging.exception("An unexpected error occurred.")
         return jsonify({'status': 'error', 'message': str(e)}), 500
     else:
         # If no other return has been reached, provide a default response
-        print("No processing occurred, returning default response")
+        logging.debug("No processing occurred, returning default response")
         return jsonify({'status': 'error', 'message': 'No processing occurred'}), 500
 
 @app.route('/whatsapp/message/peak_response_time', methods=['POST'])
@@ -976,11 +973,11 @@ def analyze_peak_response_time():
         return send_file(temp_file.name, mimetype='image/png')
 
     except Exception as e:
-        print(f"An error occurred: {e}")
+        logging.exception("An unexpected error occurred.")
         return jsonify({'status': 'error', 'message': str(e)}), 500
     else:
         # If no other return has been reached, provide a default response
-        print("No processing occurred, returning default response")
+        logging.debug("No processing occurred, returning default response")
         return jsonify({'status': 'error', 'message': 'No processing occurred'}), 500
 
 @app.route('/whatsapp/message/peak_response_time/json', methods=['POST'])
@@ -1052,11 +1049,11 @@ def analyze_peak_response_time_json():
         return jsonify(result)
 
     except Exception as e:
-        print(f"An error occurred: {e}")
+        logging.exception("An unexpected error occurred.")
         return jsonify({'status': 'error', 'message': str(e)}), 500
     else:
         # If no other return has been reached, provide a default response
-        print("No processing occurred, returning default response")
+        logging.debug("No processing occurred, returning default response")
         return jsonify({'status': 'error', 'message': 'No processing occurred'}), 500
 
 
@@ -1131,11 +1128,11 @@ def activity_heatmap():
         return send_file(temp_file.name, mimetype='image/png')
 
     except Exception as e:
-        print(f"An error occurred: {e}")
+        logging.exception("An unexpected error occurred.")
         return jsonify({'status': 'error', 'message': str(e)}), 500
     else:
         # If no other return has been reached, provide a default response
-        print("No processing occurred, returning default response")
+        logging.debug("No processing occurred, returning default response")
         return jsonify({'status': 'error', 'message': 'No processing occurred'}), 500
 
 @app.route('/whatsapp/message/user_activity_over_time', methods=['POST'])
@@ -1202,11 +1199,11 @@ def user_activity_over_time():
         return send_file(temp_file.name, mimetype='image/png')
 
     except Exception as e:
-        print(f"An error occurred: {e}")
+        logging.exception("An unexpected error occurred.")
         return jsonify({'status': 'error', 'message': str(e)}), 500
     else:
         # If no other return has been reached, provide a default response
-        print("No processing occurred, returning default response")
+        logging.debug("No processing occurred, returning default response")
         return jsonify({'status': 'error', 'message': 'No processing occurred'}), 500
 
 @app.route('/whatsapp/message/top_emojis_json/<int:top_n>', methods=['POST'])
@@ -1260,11 +1257,11 @@ def get_top_emojis_json(top_n=10):
         return jsonify(sorted_emoji_counts)
 
     except Exception as e:
-        print(f"An error occurred: {e}")
+        logging.exception("An unexpected error occurred.")
         return jsonify({'status': 'error', 'message': str(e)}), 500
     else:
         # If no other return has been reached, provide a default response
-        print("No processing occurred, returning default response")
+        logging.debug("No processing occurred, returning default response")
         return jsonify({'status': 'error', 'message': 'No processing occurred'}), 500
 
 # Conversational Turn Analysis
@@ -1351,11 +1348,11 @@ def plot_conversational_turns():
         return send_file(temp_file.name, mimetype='image/png')
 
     except Exception as e:
-        print(f"An error occurred: {e}")
+        logging.exception("An unexpected error occurred.")
         return jsonify({'status': 'error', 'message': str(e)}), 500
     else:
         # If no other return has been reached, provide a default response
-        print("No processing occurred, returning default response")
+        logging.debug("No processing occurred, returning default response")
         return jsonify({'status': 'error', 'message': 'No processing occurred'}), 500
 
 
@@ -1427,11 +1424,11 @@ def mention_analysis():
         return send_file(temp_file.name, mimetype='image/png')
 
     except Exception as e:
-        print(f"An error occurred: {e}")
+        logging.exception("An unexpected error occurred.")
         return jsonify({'status': 'error', 'message': str(e)}), 500
     else:
         # If no other return has been reached, provide a default response
-        print("No processing occurred, returning default response")
+        logging.debug("No processing occurred, returning default response")
         return jsonify({'status': 'error', 'message': 'No processing occurred'}), 500
 
 
@@ -1500,11 +1497,11 @@ def plot_active_days():
         return send_file(temp_file.name, mimetype='image/png')
 
     except Exception as e:
-        print(f"An error occurred: {e}")
+        logging.exception("An unexpected error occurred.")
         return jsonify({'status': 'error', 'message': str(e)}), 500
     else:
         # If no other return has been reached, provide a default response
-        print("No processing occurred, returning default response")
+        logging.debug("No processing occurred, returning default response")
         return jsonify({'status': 'error', 'message': 'No processing occurred'}), 500
 
 @app.route('/whatsapp/message/topic_percentage', methods=['POST'])
@@ -1573,11 +1570,11 @@ def topic_percentage():
         return send_file(temp_file.name, mimetype='image/png')
 
     except Exception as e:
-        print(f"An error occurred: {e}")
+        logging.exception("An unexpected error occurred.")
         return jsonify({'status': 'error', 'message': str(e)}), 500
     else:
         # If no other return has been reached, provide a default response
-        print("No processing occurred, returning default response")
+        logging.debug("No processing occurred, returning default response")
         return jsonify({'status': 'error', 'message': 'No processing occurred'}), 500
 
 
@@ -1646,11 +1643,11 @@ def topic_percentage_json():
         })
 
     except Exception as e:
-        print(f"An error occurred: {e}")
+        logging.exception("An unexpected error occurred.")
         return jsonify({'status': 'error', 'message': str(e)}), 500
     else:
         # If no other return has been reached, provide a default response
-        print("No processing occurred, returning default response")
+        logging.debug("No processing occurred, returning default response")
         return jsonify({'status': 'error', 'message': 'No processing occurred'}), 500
 
 
@@ -1692,18 +1689,14 @@ def plot_word_frequency(top_words=20):
         messages = [message_pattern.search(line).group(1) if message_pattern.search(line) else None for line in content]
         messages = [message for message in messages if message is not None]
 
-        stop_words = _stop_words.union(portuguese_stop_words)
+        # stop_words = _stop_words.union(portuguese_stop_words)
+        preprocessed_messages = [' '.join(preprocess(message)) for message in messages]
 
         # Tokenize the messages and count the frequency of each word
         word_freq = Counter()
-        for message in messages:
+        for message in preprocessed_messages:
             tokens = message.split()
             word_freq.update(tokens)
-
-        # Remove stop words from the frequency counter
-        for stop_word in stop_words:
-            if stop_word in word_freq:
-                del word_freq[stop_word]
 
         # Extract the top N words for plotting
         top_words_data = word_freq.most_common(top_words)
@@ -1726,11 +1719,11 @@ def plot_word_frequency(top_words=20):
         return send_file(temp_file.name, mimetype='image/png')
 
     except Exception as e:
-        print(f"An error occurred: {e}")
+        logging.exception("An unexpected error occurred.")
         return jsonify({'status': 'error', 'message': str(e)}), 500
     else:
         # If no other return has been reached, provide a default response
-        print("No processing occurred, returning default response")
+        logging.debug("No processing occurred, returning default response")
         return jsonify({'status': 'error', 'message': 'No processing occurred'}), 500
 
 
@@ -1746,7 +1739,7 @@ def plot_cleaned_wordcloud():
     if file.filename == '':
         return 'No selected file', 400
     if not allowed_file(file.filename):
-        print("File type not allowed")
+        logging.debug("File type not allowed")
         return 'File type not allowed', 400
 
     try:
@@ -1769,22 +1762,18 @@ def plot_cleaned_wordcloud():
         # Regular expression to extract the message content
         message_pattern = re.compile(r"\d{1,2}/\d{1,2}/\d{2,4}, \d{1,2}:\d{1,2}\s[APMapm]{2} - .*?: (.*)")
 
+
         # Extract message content
         messages = [message_pattern.search(line).group(1) if message_pattern.search(line) else None for line in content]
         messages = [message for message in messages if message is not None]
 
-        stop_words = _stop_words.union(portuguese_stop_words)
+        preprocessed_messages = [' '.join(preprocess(message)) for message in messages]
 
-        # Concatenate all messages
-        text = ' '.join(messages)
-
-        # Cleaning the text
-        for stop_word in stop_words:
-            text = text.replace(f" {stop_word} ", " ")
-        text = text.replace("Media omitted", "").replace("omitted Media", "")
+        # # Concatenate all messages
+        text = ' '.join(preprocessed_messages)
 
         # Generate the word cloud
-        wordcloud = WordCloud(background_color='white', width=800, height=400, max_words=200).generate(text)
+        wordcloud = WordCloud(background_color='white', width=800, height=400, max_words=200).generate(' '.join(preprocessed_messages))
 
         # Check if the word cloud is effectively empty
         if not wordcloud.words_:
@@ -1807,11 +1796,11 @@ def plot_cleaned_wordcloud():
         return send_file(temp_file.name, mimetype='image/png')
 
     except Exception as e:
-        print(f"An error occurred: {e}")
+        logging.exception("An unexpected error occurred.")
         return jsonify({'status': 'error', 'message': str(e)}), 500
     else:
         # If no other return has been reached, provide a default response
-        print("No processing occurred, returning default response")
+        logging.debug("No processing occurred, returning default response")
         return jsonify({'status': 'error', 'message': 'No processing occurred'}), 500
 
 @app.route('/whatsapp/message/lenghiest/top/<int:top_contributors>', methods=['POST'])
@@ -1887,11 +1876,11 @@ def plot_lengthiest_messages_pie_chart(top_contributors):
         return send_file(temp_file.name, mimetype='image/png')
 
     except Exception as e:
-        print(f"An error occurred: {e}")
+        logging.exception("An unexpected error occurred.")
         return jsonify({'status': 'error', 'message': str(e)}), 500
     else:
         # If no other return has been reached, provide a default response
-        print("No processing occurred, returning default response")
+        logging.debug("No processing occurred, returning default response")
         return jsonify({'status': 'error', 'message': 'No processing occurred'}), 500
 
 
@@ -1964,11 +1953,11 @@ def plot_sentiment_distribution():
         return send_file(temp_file.name, mimetype='image/png')
 
     except Exception as e:
-        print(f"An error occurred: {e}")
+        logging.exception("An unexpected error occurred.")
         return jsonify({'status': 'error', 'message': str(e)}), 500
     else:
         # If no other return has been reached, provide a default response
-        print("No processing occurred, returning default response")
+        logging.debug("No processing occurred, returning default response")
         return jsonify({'status': 'error', 'message': 'No processing occurred'}), 500
 
 
@@ -2055,11 +2044,11 @@ def plot_hourly_heatmap():
         return send_file(temp_file.name, mimetype='image/png')
 
     except Exception as e:
-        print(f"An error occurred: {e}")
+        logging.exception("An unexpected error occurred.")
         return jsonify({'status': 'error', 'message': str(e)}), 500
     else:
         # If no other return has been reached, provide a default response
-        print("No processing occurred, returning default response")
+        logging.debug("No processing occurred, returning default response")
         return jsonify({'status': 'error', 'message': 'No processing occurred'}), 500
 
 @app.route('/whatsapp/message/usercount', methods=['POST'])
@@ -2139,11 +2128,11 @@ def user_message_count():
         return send_file(temp_file.name, mimetype='image/png')
 
     except Exception as e:
-        print(f"An error occurred: {e}")
+        logging.exception("An unexpected error occurred.")
         return jsonify({'status': 'error', 'message': str(e)}), 500
     else:
         # If no other return has been reached, provide a default response
-        print("No processing occurred, returning default response")
+        logging.debug("No processing occurred, returning default response")
         return jsonify({'status': 'error', 'message': 'No processing occurred'}), 500
 
 
@@ -2214,11 +2203,11 @@ def most_active_users(num_users):
         return send_file(temp_file.name, mimetype='image/png')
 
     except Exception as e:
-        print(f"An error occurred: {e}")
+        logging.exception("An unexpected error occurred.")
         return jsonify({'status': 'error', 'message': str(e)}), 500
     else:
         # If no other return has been reached, provide a default response
-        print("No processing occurred, returning default response")
+        logging.debug("No processing occurred, returning default response")
         return jsonify({'status': 'error', 'message': 'No processing occurred'}), 500
 
 
