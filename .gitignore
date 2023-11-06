@@ -73,3 +73,5 @@ htmlcov/
 # test files
 test.py
 test*.py
+
+*.txt

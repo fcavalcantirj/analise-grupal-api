@@ -7,6 +7,8 @@ import base64
 import requests
 import logging
 import cloudinary
+import openai
+import json
 from collections import defaultdict
 from collections import Counter
 from flask import Flask, request, send_file, jsonify, abort
@@ -36,6 +38,8 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - [%
 
 ALLOWED_EXTENSIONS = {'txt', 'zip', 'zipfile'}
 ALLOWED_HOSTS = ["https://analisegrupal.com.br", "https://api.analisegrupal.com.br"]
+
+openai.api_key = os.getenv("CHATGPT_ABECMED_APIKEY")
 
 nltk.download('stopwords')
 nltk.download('wordnet')
@@ -113,9 +117,8 @@ remove_words = [
     "https", "figurinha omitida", "imagem ocultada", "oculto>", "mídia", "[]", "<Aruivo", "apagada", "Mensagem",
     "<", "editada>", ">", "message", "Message", "deleted", "Deleted", "This", "this", "file attached", "attached",
     "Arquivo oculto", "Arquivo", "oculto", "vídeo omitido", "imagem ocultada", "ocultada", "imagem", "ocultado áudio",
-    "ocultado", "áudio", "ocultado audio", "omitida", "figurinha", "vídeo", "omitido"
+    "ocultado", "áudio", "ocultado audio", "omitida", "figurinha", "vídeo", "omitido", "anexado"
 ]
-
 
 def preprocess(text):
     # Convert both lists to sets and then union them
@@ -364,6 +367,72 @@ def decode_file(file_stream):
         raise  # Re-raise the exception to be handled by the calling function
 
 
+def extract_and_analyze_sentiment(content):
+    """
+    Extracts messages and analyzes sentiment to calculate average sentiment per person.
+    """
+    message_pattern = re.compile(r"\d{1,2}/\d{1,2}/\d{2,4}, \d{1,2}:\d{1,2}\s[APMapm]{2} - (.*?): (.*)")
+    extracted_data = [(match.group(1), match.group(2)) for line in content if (match := message_pattern.search(line))]
+
+    senders, messages = zip(*extracted_data)
+
+    # Compute sentiment scores
+    analyzer = SentimentIntensityAnalyzer()
+    sentiments = [analyzer.polarity_scores(msg)['compound'] for msg in messages]
+
+    # Calculate average sentiment per person
+    sender_sentiments = defaultdict(list)
+    for sender, sentiment in zip(senders, sentiments):
+        sender_sentiments[sender].append(sentiment)
+
+    avg_sentiments = {sender: sum(vals)/len(vals) for sender, vals in sender_sentiments.items()}
+
+    return avg_sentiments
+
+
+def construct_prompt_from_data_avg_sentiments(avg_sentiments, type):
+    """
+    Constructs a human-like prompt from the sentiment analysis data, using two decimal places for sentiment scores.
+    """
+    prompt = "The data shows the average sentiment scores per person in a WhatsApp group chat. Here are some key insights:\n"
+    for sender, sentiment in avg_sentiments.items():
+        sentiment_description = "positive" if sentiment > 0 else "negative" if sentiment < 0 else "neutral"
+        prompt += f"- Sentiment for {sender} is {sentiment_description}, with an average score of {sentiment:.2f}.\n"
+    
+    if type == 'technical':
+        prompt += "Please provide a technical explanation of what this might suggest about the group dynamics."
+    elif type == 'fun':
+        prompt += "Let's make this fun and not serious. Provide a brief, but creative and fun explanation of what this might suggest about the group dynamics."
+    elif type == 'zoeira':
+        prompt += "Please provide a sarcastic fun analysis of the data. Be intelligent, bold, you can get creative here (not super long please). Theres a saying in brazil; 'The zueira never ends!' take this saying seriously."
+    prompt += " Em português, por favor."
+    
+    return prompt
+
+
+def call_chatgpt_api(prompt, model_name, length=150, temperature=0):
+    if not openai.api_key:
+        logging.error("No API key found. Please set the CHATGPT_ABECMED_APIKEY environment variable.")
+        raise ValueError('No API key found. Please set the CHATGPT_ABECMED_APIKEY environment variable.')
+
+    try:
+        response = openai.ChatCompletion.create(
+            model=model_name,
+            messages=[
+                {"role": "system", "content": "This is a message."},
+                {"role": "user", "content": prompt}
+            ],
+            max_tokens=length,
+            temperature=temperature
+        )
+        if response:
+            logging.info("OpenAI API call successful.")
+            return response['choices'][0]['message']['content']
+    except openai.error.OpenAIError as e:
+        logging.error(f"An error occurred while calling OpenAI API: {e}")
+        return None
+
+
 @app.route('/')
 def home():
     # origin = request.headers.get('Origin') or request.headers.get('Referer')
@@ -574,23 +643,7 @@ def plot_avg_sentiment_per_person():
             content = preprocess_content(_content)
 
         # print(f"@@@@@@@ Content preview: {content[:5]}")
-            
-        # Regular expression to extract timestamp, sender and messages
-        message_pattern = re.compile(r"\d{1,2}/\d{1,2}/\d{2,4}, \d{1,2}:\d{1,2}\s[APMapm]{2} - (.*?): (.*)")
-        extracted_data = [(match.group(1), match.group(2)) for line in content if (match := message_pattern.search(line))]
-
-        senders, messages = zip(*extracted_data)
-
-        # Compute sentiment scores
-        analyzer = SentimentIntensityAnalyzer()
-        sentiments = [analyzer.polarity_scores(msg)['compound'] for msg in messages]
-
-        # Calculate average sentiment per person
-        sender_sentiments = defaultdict(list)
-        for sender, sentiment in zip(senders, sentiments):
-            sender_sentiments[sender].append(sentiment)
-
-        avg_sentiments = {sender: sum(vals)/len(vals) for sender, vals in sender_sentiments.items()}
+        avg_sentiments = extract_and_analyze_sentiment(content)
 
         if len(avg_sentiments) == 0:  # Check if the DataFrame is empty
             return "No data available for plotting - avg_sentiments.empty", 400
@@ -632,6 +685,65 @@ def plot_avg_sentiment_per_person():
         logging.debug("No processing occurred, returning default response")
         return jsonify({'status': 'error', 'message': 'No processing occurred'}), 500
 
+
+@app.route('/whatsapp/message/avg_sentiment_per_person/analyse', methods=['POST'])
+def analyse_avg_sentiment_per_person():
+    print("Received request for avg_sentiment_per_person_analyse")
+    if 'file' not in request.files:
+        print("No file part in request")
+        return 'No file part', 400
+    file = request.files['file']
+    if file.filename == '':
+        print("No selected file")
+        return 'No selected file', 400
+    if not allowed_file(file.filename):
+        print("File type not allowed")
+        return 'File type not allowed', 400
+    
+    data = json.loads(request.form.get('data', '{}'))
+    analysis_type = data.get('type', 'technical')  # Default to 'technical' if not provided
+    temperature = data.get('temperature', 0)  # Default to 0 if not provided
+
+    try:
+        if zipfile.is_zipfile(file):
+            # print("Processing zip file")
+            with zipfile.ZipFile(file) as z:
+                txt_file = next((f for f in z.namelist() if f.lower().endswith('.txt')), None)
+                if txt_file is None:
+                    # print("No txt file found in the zip")
+                    return 'No txt file found in the zip', 400
+                with z.open(txt_file) as f:
+                    content = preprocess_content(decode_file(f))
+        else:
+            # print("Processing regular txt file")
+            file.seek(0)  # Reset pointer to the beginning of the file
+            _content = file.read().decode('utf-8').splitlines()
+            content = preprocess_content(_content)
+
+        # print(f"@@@@@@@ Content preview: {content[:5]}")
+        avg_sentiments = extract_and_analyze_sentiment(content)
+
+        if len(avg_sentiments) == 0:
+            return "No data available for analysis - avg_sentiments.empty", 400
+
+        # Construct a prompt for the ChatGPT API
+        prompt = construct_prompt_from_data_avg_sentiments(avg_sentiments, analysis_type)
+
+        print(prompt)
+
+        length = 300 if analysis_type == 'technical' else 400 if analysis_type == 'fun' else 500 if analysis_type == 'zoeira' else 300
+        chatgpt_response = call_chatgpt_api(prompt, "gpt-3.5-turbo", length, temperature)
+
+        # For the sake of this example, we're just returning the mock response directly
+        return jsonify(chatgpt_response)
+    
+    except Exception as e:
+        logging.exception("An unexpected error occurred.")
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+    else:
+        # If no other return has been reached, provide a default response
+        logging.debug("No processing occurred, returning default response")
+        return jsonify({'status': 'error', 'message': 'No processing occurred'}), 500
 
 @app.route('/whatsapp/message/length_over_time', methods=['POST'])
 def plot_message_length_over_time():
@@ -2214,4 +2326,4 @@ def most_active_users(num_users):
 
 
 if __name__ == '__main__':
-    app.run(debug=False, host='0.0.0.0', port=5000)
+    app.run(debug=True, host='0.0.0.0', port=5000)
