@@ -117,7 +117,8 @@ remove_words = [
     "https", "figurinha omitida", "imagem ocultada", "oculto>", "mídia", "[]", "<Aruivo", "apagada", "Mensagem",
     "<", "editada>", ">", "message", "Message", "deleted", "Deleted", "This", "this", "file attached", "attached",
     "Arquivo oculto", "Arquivo", "oculto", "vídeo omitido", "imagem ocultada", "ocultada", "imagem", "ocultado áudio",
-    "ocultado", "áudio", "ocultado audio", "omitida", "figurinha", "vídeo", "omitido", "anexado", "sticker", "image", "imagem"
+    "ocultado", "áudio", "ocultado audio", "omitida", "figurinha", "vídeo", "omitido", "anexado", "sticker", "image", 
+    "imagem", "vídeo"
 ]
 
 def preprocess(text):
@@ -729,7 +730,7 @@ def analyse_avg_sentiment_per_person():
         # Construct a prompt for the ChatGPT API
         prompt = construct_prompt_from_data_avg_sentiments(avg_sentiments, analysis_type)
 
-        print(prompt)
+        # print(prompt)
 
         length = 350 if analysis_type == 'technical' else 400 if analysis_type == 'fun' else 500 if analysis_type == 'zoeira' else 300
         chatgpt_response = call_chatgpt_api(prompt, "gpt-3.5-turbo", length, temperature)
