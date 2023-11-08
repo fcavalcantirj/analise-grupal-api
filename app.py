@@ -466,7 +466,7 @@ def upload_to_imgur():
         return jsonify({'error': 'No selected image'}), 400
 
     try:
-        time.sleep(6)
+        # time.sleep(6)
 
         # Read the image and encode it in base64
         image_b64 = base64.b64encode(file.read()).decode('utf-8')
