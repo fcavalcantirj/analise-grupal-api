@@ -119,7 +119,7 @@ remove_words = [
     "<", "editada>", ">", "message", "Message", "deleted", "Deleted", "This", "this", "file attached", "attached",
     "Arquivo oculto", "Arquivo", "oculto", "vídeo omitido", "imagem ocultada", "ocultada", "imagem", "ocultado áudio",
     "ocultado", "áudio", "ocultado audio", "omitida", "figurinha", "video", "omitido", "anexado", "sticker", "image", 
-    "imagem", "vídeo", "foto", "edited", "igshid", "open spotify", "open", "spotify", "gmail", "foto", "youtube"
+    "imagem", "vídeo", "foto", "edited", "igshid", "open spotify", "open", "spotify", "gmail", "foto", "youtube", "instagram"
 ]
 
 def preprocess(text):
