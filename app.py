@@ -9,6 +9,7 @@ import logging
 import cloudinary
 import openai
 import json
+import time
 from collections import defaultdict
 from collections import Counter
 from flask import Flask, request, send_file, jsonify, abort
@@ -117,8 +118,8 @@ remove_words = [
     "https", "figurinha omitida", "imagem ocultada", "oculto>", "mídia", "[]", "<Aruivo", "apagada", "Mensagem",
     "<", "editada>", ">", "message", "Message", "deleted", "Deleted", "This", "this", "file attached", "attached",
     "Arquivo oculto", "Arquivo", "oculto", "vídeo omitido", "imagem ocultada", "ocultada", "imagem", "ocultado áudio",
-    "ocultado", "áudio", "ocultado audio", "omitida", "figurinha", "vídeo", "omitido", "anexado", "sticker", "image", 
-    "imagem", "vídeo"
+    "ocultado", "áudio", "ocultado audio", "omitida", "figurinha", "video", "omitido", "anexado", "sticker", "image", 
+    "imagem", "vídeo", "foto", "edited", "igshid", "open spotify", "open", "spotify", "gmail", "foto", "youtube"
 ]
 
 def preprocess(text):
@@ -465,6 +466,8 @@ def upload_to_imgur():
         return jsonify({'error': 'No selected image'}), 400
 
     try:
+        time.sleep(6)
+
         # Read the image and encode it in base64
         image_b64 = base64.b64encode(file.read()).decode('utf-8')
 
@@ -2327,4 +2330,4 @@ def most_active_users(num_users):
 
 
 if __name__ == '__main__':
-    app.run(debug=False, host='0.0.0.0', port=5000)
+    app.run(debug=True, host='0.0.0.0', port=5000)
