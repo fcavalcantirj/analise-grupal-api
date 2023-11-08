@@ -590,7 +590,7 @@ def topic_modeling():
         else:
             # print("Processing regular txt file")
             file.seek(0)  # Reset pointer to the beginning of the file
-            _content = file.read().decode('utf-8').splitlines()
+            _content = file.read().decode('utf-8', errors='replace').splitlines()
             content = preprocess_content(_content)
 
             message_pattern = re.compile(r"\d{1,2}/\d{1,2}/\d{2,4}, \d{1,2}:\d{1,2}\s[APMapm]{2} - .*?: (.*)")
@@ -643,7 +643,7 @@ def plot_avg_sentiment_per_person():
         else:
             # print("Processing regular txt file")
             file.seek(0)  # Reset pointer to the beginning of the file
-            _content = file.read().decode('utf-8').splitlines()
+            _content = file.read().decode('utf-8', errors='replace').splitlines()
             content = preprocess_content(_content)
 
         # print(f"@@@@@@@ Content preview: {content[:5]}")
@@ -721,7 +721,7 @@ def analyse_avg_sentiment_per_person():
         else:
             # print("Processing regular txt file")
             file.seek(0)  # Reset pointer to the beginning of the file
-            _content = file.read().decode('utf-8').splitlines()
+            _content = file.read().decode('utf-8', errors='replace').splitlines()
             content = preprocess_content(_content)
 
         # print(f"@@@@@@@ Content preview: {content[:5]}")
@@ -779,7 +779,7 @@ def plot_message_length_over_time():
         else:
             # print("Processing regular txt file")
             file.seek(0)  # Reset pointer to the beginning of the file
-            _content = file.read().decode('utf-8').splitlines()
+            _content = file.read().decode('utf-8', errors='replace').splitlines()
             content = preprocess_content(_content)
 
         # print(f"Content preview: {content[:5]}")
@@ -863,7 +863,7 @@ def avg_sentiment_per_person_json():
         else:
             # print("Processing regular txt file")
             file.seek(0)  # Reset pointer to the beginning of the file
-            _content = file.read().decode('utf-8').splitlines()
+            _content = file.read().decode('utf-8', errors='replace').splitlines()
             content = preprocess_content(_content)
 
         # Regular expression to extract timestamp, sender and messages
@@ -925,7 +925,7 @@ def plot_sentiment_over_time():
         else:
             # print("Processing regular txt file")
             file.seek(0)  # Reset pointer to the beginning of the file
-            _content = file.read().decode('utf-8').splitlines()
+            _content = file.read().decode('utf-8', errors='replace').splitlines()
             content = preprocess_content(_content)
         
         # Regular expression to extract timestamp and messages
@@ -1008,7 +1008,7 @@ def analyze_peak_response_time():
         else:
             # print("Processing regular txt file")
             file.seek(0)  # Reset pointer to the beginning of the file
-            _content = file.read().decode('utf-8').splitlines()
+            _content = file.read().decode('utf-8', errors='replace').splitlines()
             content = preprocess_content(_content)
 
         # print(content[:10])  # Print the first 10 lines
@@ -1128,7 +1128,7 @@ def analyze_peak_response_time_json():
         else:
             # print("Processing regular txt file")
             file.seek(0)  # Reset pointer to the beginning of the file
-            _content = file.read().decode('utf-8').splitlines()
+            _content = file.read().decode('utf-8', errors='replace').splitlines()
             content = preprocess_content(_content)
 
         # Define a regex pattern to extract the timestamp and sender's name
@@ -1205,7 +1205,7 @@ def activity_heatmap():
         else:
             # print("Processing regular txt file")
             file.seek(0)  # Reset pointer to the beginning of the file
-            _content = file.read().decode('utf-8').splitlines()
+            _content = file.read().decode('utf-8', errors='replace').splitlines()
             content = preprocess_content(_content)
 
         # Define a regex pattern to extract date and time details
@@ -1283,7 +1283,7 @@ def user_activity_over_time():
         else:
             # print("Processing regular txt file")
             file.seek(0)  # Reset pointer to the beginning of the file
-            _content = file.read().decode('utf-8').splitlines()
+            _content = file.read().decode('utf-8', errors='replace').splitlines()
             content = preprocess_content(_content)
 
         # Define a regex pattern to extract the date and participant names
@@ -1354,7 +1354,7 @@ def get_top_emojis_json(top_n=10):
         else:
             # print("Processing regular txt file")
             file.seek(0)  # Reset pointer to the beginning of the file
-            _content = file.read().decode('utf-8').splitlines()
+            _content = file.read().decode('utf-8', errors='replace').splitlines()
             content = preprocess_content(_content)
 
         # Define a regex pattern to extract the message content
@@ -1419,7 +1419,7 @@ def plot_conversational_turns():
         else:
             # print("Processing regular txt file")
             file.seek(0)  # Reset pointer to the beginning of the file
-            _content = file.read().decode('utf-8').splitlines()
+            _content = file.read().decode('utf-8', errors='replace').splitlines()
             content = preprocess_content(_content)
 
         # Define a regex pattern to extract the sender of each message
@@ -1505,7 +1505,7 @@ def mention_analysis():
         else:
             # print("Processing regular txt file")
             file.seek(0)  # Reset pointer to the beginning of the file
-            _content = file.read().decode('utf-8').splitlines()
+            _content = file.read().decode('utf-8', errors='replace').splitlines()
             content = preprocess_content(_content)
 
         # Regular expression to extract sender and messages
@@ -1580,7 +1580,7 @@ def plot_active_days():
         else:
             # print("Processing regular txt file")
             file.seek(0)  # Reset pointer to the beginning of the file
-            _content = file.read().decode('utf-8').splitlines()
+            _content = file.read().decode('utf-8', errors='replace').splitlines()
             content = preprocess_content(_content)
 
         # Define a regex pattern to extract the date of each message
@@ -1652,7 +1652,7 @@ def topic_percentage():
         else:
             # print("Processing regular txt file")
             file.seek(0)  # Reset pointer to the beginning of the file
-            _content = file.read().decode('utf-8').splitlines()
+            _content = file.read().decode('utf-8', errors='replace').splitlines()
             content = preprocess_content(_content)
         
         # Extract messages from the content
@@ -1726,7 +1726,7 @@ def topic_percentage_json():
         else:
             # print("Processing regular txt file")
             file.seek(0)  # Reset pointer to the beginning of the file
-            _content = file.read().decode('utf-8').splitlines()
+            _content = file.read().decode('utf-8', errors='replace').splitlines()
             content = preprocess_content(_content)
 
         # Extract messages from the content
@@ -1799,7 +1799,7 @@ def plot_word_frequency(top_words=20):
         else:
             # print("Processing regular txt file")
             file.seek(0)  # Reset pointer to the beginning of the file
-            _content = file.read().decode('utf-8').splitlines()
+            _content = file.read().decode('utf-8', errors='replace').splitlines()
             content = preprocess_content(_content)
 
         # Define a regex pattern to extract the content of each message
@@ -1874,7 +1874,7 @@ def plot_cleaned_wordcloud():
         else:
             # print("Processing regular txt file")
             file.seek(0)  # Reset pointer to the beginning of the file
-            _content = file.read().decode('utf-8').splitlines()
+            _content = file.read().decode('utf-8', errors='replace').splitlines()
             content = preprocess_content(_content)
 
         # Regular expression to extract the message content
@@ -1951,7 +1951,7 @@ def plot_lengthiest_messages_pie_chart(top_contributors):
         else:
             # print("Processing regular txt file")
             file.seek(0)  # Reset pointer to the beginning of the file
-            _content = file.read().decode('utf-8').splitlines()
+            _content = file.read().decode('utf-8', errors='replace').splitlines()
             content = preprocess_content(_content)
 
         # Define a regex pattern to extract participant names and their messages
@@ -2032,7 +2032,7 @@ def plot_sentiment_distribution():
         else:
             # print("Processing regular txt file")
             file.seek(0)  # Reset pointer to the beginning of the file
-            _content = file.read().decode('utf-8').splitlines()
+            _content = file.read().decode('utf-8', errors='replace').splitlines()
             content = preprocess_content(_content)
 
         # Define a regex pattern to extract the content of each message
@@ -2109,7 +2109,7 @@ def plot_hourly_heatmap():
         else:
             # print("Processing regular txt file")
             file.seek(0)  # Reset pointer to the beginning of the file
-            _content = file.read().decode('utf-8').splitlines()
+            _content = file.read().decode('utf-8', errors='replace').splitlines()
             content = preprocess_content(_content)
 
         # Extract hour along with the AM/PM marker using regex
@@ -2202,7 +2202,7 @@ def user_message_count():
         else:
             # print("Processing regular txt file")
             file.seek(0)  # Reset pointer to the beginning of the file
-            _content = file.read().decode('utf-8').splitlines()
+            _content = file.read().decode('utf-8', errors='replace').splitlines()
             content = preprocess_content(_content)
 
         # Regular expression to extract the name pattern from a typical line
@@ -2284,7 +2284,7 @@ def most_active_users(num_users):
         else:
             # print("Processing regular txt file")
             file.seek(0)  # Reset pointer to the beginning of the file
-            _content = file.read().decode('utf-8').splitlines()
+            _content = file.read().decode('utf-8', errors='replace').splitlines()
             content = preprocess_content(_content)
 
         # Define a regex pattern to extract participant names from each message
