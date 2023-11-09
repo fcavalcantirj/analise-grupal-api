@@ -735,7 +735,7 @@ def analyse_avg_sentiment_per_person():
 
         # print(prompt)
 
-        length = 350 if analysis_type == 'technical' else 400 if analysis_type == 'fun' else 500 if analysis_type == 'zoeira' else 300
+        length = 350 if analysis_type == 'technical' else 400 if analysis_type == 'fun' else 400 if analysis_type == 'zoeira' else 300
         chatgpt_response = call_chatgpt_api(prompt, "gpt-3.5-turbo", length, temperature)
 
         # For the sake of this example, we're just returning the mock response directly
