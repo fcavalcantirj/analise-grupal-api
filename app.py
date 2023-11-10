@@ -391,6 +391,32 @@ def extract_and_analyze_sentiment(content):
 
     return avg_sentiments
 
+def construct_shorter_prompt_from_data_avg_sentiments(avg_sentiments, type):
+    """
+    Constructs a shorter human-like prompt from the sentiment analysis data.
+    """
+    # Sort sentiments and pick extremes or a representative sample.
+    sorted_sentiments = sorted(avg_sentiments.items(), key=lambda x: x[1], reverse=True)
+    top_sentiments = sorted_sentiments[:7]  # Taking only the top 3 for brevity
+    bottom_sentiments = sorted_sentiments[-7:]  # Taking only the bottom 3 for brevity
+    
+    prompt = "Análise de sentimentos de um chat do WhatsApp:\n"
+    prompt += "Top positivos:\n"
+    prompt += "".join(f"- {sender}: {sentiment:.2f}\n" for sender, sentiment in top_sentiments)
+    prompt += "Top negativos:\n"
+    prompt += "".join(f"- {sender}: {sentiment:.2f}\n" for sender, sentiment in bottom_sentiments)
+    
+    # Add the type-specific message
+    analysis_types = {
+        'technical': "Explicação técnica dos dados e dinâmica do grupo:",
+        'fun': "Explicação criativa e divertida:",
+        'zoeira': "Análise sarcástica (Zueira never ends):"
+    }
+    
+    prompt += analysis_types.get(type, "Explicação:") + "\n"
+    
+    return prompt
+
 
 def construct_prompt_from_data_avg_sentiments(avg_sentiments, type):
     """
@@ -730,12 +756,18 @@ def analyse_avg_sentiment_per_person():
         if len(avg_sentiments) == 0:
             return "No data available for analysis - avg_sentiments.empty", 400
 
-        # Construct a prompt for the ChatGPT API
-        prompt = construct_prompt_from_data_avg_sentiments(avg_sentiments, analysis_type)
+        # print(len(avg_sentiments))
+        # print("****")
+
+        if len(avg_sentiments) > 40:
+            prompt = construct_shorter_prompt_from_data_avg_sentiments(avg_sentiments, analysis_type)
+        else:
+            # Construct a prompt for the ChatGPT API
+            prompt = construct_prompt_from_data_avg_sentiments(avg_sentiments, analysis_type)
 
         # print(prompt)
 
-        length = 350 if analysis_type == 'technical' else 400 if analysis_type == 'fun' else 400 if analysis_type == 'zoeira' else 300
+        length = 350 if analysis_type == 'technical' else 400 if analysis_type == 'fun' else 500 if analysis_type == 'zoeira' else 300
         chatgpt_response = call_chatgpt_api(prompt, "gpt-3.5-turbo", length, temperature)
 
         # For the sake of this example, we're just returning the mock response directly
