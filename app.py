@@ -393,27 +393,34 @@ def extract_and_analyze_sentiment(content):
 
 def construct_shorter_prompt_from_data_avg_sentiments(avg_sentiments, type):
     """
-    Constructs a shorter human-like prompt from the sentiment analysis data.
+    Constructs a human-like prompt from the sentiment analysis data, using two decimal places for sentiment scores,
+    focusing on the top and bottom 7 sentiments.
     """
-    # Sort sentiments and pick extremes or a representative sample.
+    # Sort the sentiments from highest to lowest
     sorted_sentiments = sorted(avg_sentiments.items(), key=lambda x: x[1], reverse=True)
-    top_sentiments = sorted_sentiments[:7]  # Taking only the top 3 for brevity
-    bottom_sentiments = sorted_sentiments[-7:]  # Taking only the bottom 3 for brevity
+    top_sentiments = sorted_sentiments[:12]  # Top 12 sentiments
+    bottom_sentiments = sorted_sentiments[-12:]  # Bottom 12 sentiments
+
+    prompt = "The data shows the average sentiment scores per person in a WhatsApp group chat. Here are some key insights:\n"
+
+    # Construct prompt for top sentiments
+    for sender, sentiment in top_sentiments:
+        sentiment_description = "positive" if sentiment > 0 else "neutral" if sentiment == 0 else "negative"
+        prompt += f"- Sentiment for {sender} is {sentiment_description}, with an avg score of {sentiment:.2f}.\n"
+
+    # Construct prompt for bottom sentiments
+    for sender, sentiment in bottom_sentiments:
+        sentiment_description = "positive" if sentiment > 0 else "neutral" if sentiment == 0 else "negative"
+        prompt += f"- Sentiment for {sender} is {sentiment_description}, with an avg score of {sentiment:.2f}.\n"
     
-    prompt = "Análise de sentimentos de um chat do WhatsApp:\n"
-    prompt += "Top positivos:\n"
-    prompt += "".join(f"- {sender}: {sentiment:.2f}\n" for sender, sentiment in top_sentiments)
-    prompt += "Top negativos:\n"
-    prompt += "".join(f"- {sender}: {sentiment:.2f}\n" for sender, sentiment in bottom_sentiments)
-    
-    # Add the type-specific message
-    analysis_types = {
-        'technical': "Explicação técnica dos dados e dinâmica do grupo:",
-        'fun': "Explicação criativa e divertida:",
-        'zoeira': "Análise sarcástica (Zueira never ends):"
-    }
-    
-    prompt += analysis_types.get(type, "Explicação:") + "\n"
+    # Add additional message based on type
+    if type == 'technical':
+        prompt += "Please provide a technical explanation of what this might suggest about the group dynamics."
+    elif type == 'fun':
+        prompt += "Let's make this fun and not serious. Provide a brief, but creative and fun explanation of what this might suggest about the group dynamics."
+    elif type == 'zoeira':
+        prompt += "Please provide a sarcastic fun analysis of the data. Be intelligent, bold, you can get creative here (not super long please). There's a saying in Brazil: 'The zueira never ends!' Take this saying seriously."
+    prompt += " Em português, por favor."
     
     return prompt
 
