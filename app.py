@@ -477,9 +477,9 @@ def limit_referer():
         # Get the Referer header from the request
         referer = request.headers.get('Referer')
         
-        # print("#")
-        # print(referer)
-        # print("#")
+        print("#")
+        print(referer)
+        print("#")
         
         # Check if the Referer header matches the allowed domain
         if referer and not referer.startswith(allowed_referer):
