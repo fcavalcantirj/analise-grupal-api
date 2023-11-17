@@ -474,16 +474,15 @@ def limit_referer():
     if os.environ.get('FLASK_ENV') == 'production':
         allowed_referer = "https://analisegrupal.com.br/"
         
-        # Get the Referer header from the request
         referer = request.headers.get('Referer')
         
-        print("#")
-        print(referer)
-        print("#")
+        # logging.debug("#")
+        # logging.debug(referer)
+        # logging.debug("#")
         
         # Check if the Referer header matches the allowed domain
         if referer and not referer.startswith(allowed_referer):
-            print("403")
+            logging.debug(f'Forbiden referer: {referer} - 403')
             abort(403)  # Forbidden
 
 
