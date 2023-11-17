@@ -468,6 +468,24 @@ def call_chatgpt_api(prompt, model_name, length=150, temperature=0):
         return None
 
 
+@app.before_request
+def limit_referer():
+    # Apply referer check only in production
+    if os.environ.get('FLASK_ENV') == 'production':
+        allowed_referer = "http://analisegrupal.com.br"
+        
+        # Get the Referer header from the request
+        referer = request.headers.get('Referer')
+        
+        print("#")
+        print(referer)
+        print("#")
+        
+        # Check if the Referer header matches the allowed domain
+        if referer and not referer.startswith(allowed_referer):
+            abort(403)  # Forbidden
+
+
 @app.route('/')
 def home():
     # origin = request.headers.get('Origin') or request.headers.get('Referer')
