@@ -368,6 +368,60 @@ def decode_file(file_stream):
         print(f"An error occurred in decode_file: {e}")
         raise  # Re-raise the exception to be handled by the calling function
 
+def process_file(request):
+    if 'file' not in request.files:
+        logging.debug("No file part in request")
+        return None, 'No file part', 400
+    file = request.files['file']
+    if file.filename == '':
+        logging.debug("No selected file")
+        return None, 'No selected file', 400
+    if not allowed_file(file.filename):
+        logging.debug("File type not allowed")
+        return None, 'File type not allowed', 400
+
+    try:
+        if zipfile.is_zipfile(file):
+            with zipfile.ZipFile(file) as z:
+                txt_file = next((f for f in z.namelist() if f.lower().endswith('.txt')), None)
+                if txt_file is None:
+                    return None, 'No txt file found in the zip', 400
+                with z.open(txt_file) as f:
+                    content = preprocess_content(decode_file(f))
+        else:
+            file.seek(0)
+            _content = file.read().decode('utf-8', errors='replace').splitlines()
+            content = preprocess_content(_content)
+        return content, None, None
+    except Exception as e:
+        logging.exception("Error processing file")
+        return None, str(e), 500
+
+def extract_and_process_sentiments(content):
+    """
+    Extracts timestamps and messages from the content and computes sentiment scores.
+    """
+    message_pattern = re.compile(r"(\d{1,2}/\d{1,2}/\d{2,4}, \d{1,2}:\d{1,2}\s[APMapm]{2}) - .*?: (.*)")
+    extracted_data = [(match.group(1), match.group(2)) for line in content if (match := message_pattern.search(line))]
+
+    if not extracted_data:
+        return None, "No valid data extracted"
+
+    timestamps, messages = zip(*extracted_data)
+
+    analyzer = SentimentIntensityAnalyzer()
+    sentiments = [analyzer.polarity_scores(msg)['compound'] for msg in messages]
+
+    df = pd.DataFrame({
+        'timestamp': pd.to_datetime(timestamps, errors='coerce', format='%m/%d/%y, %I:%M %p'),
+        'sentiment': sentiments
+    }).dropna()
+
+    df.set_index('timestamp', inplace=True)
+    df = df.resample('D').mean().fillna(0)
+
+    return df, None
+
 
 def extract_and_analyze_sentiment(content):
     """
@@ -390,6 +444,57 @@ def extract_and_analyze_sentiment(content):
     avg_sentiments = {sender: sum(vals)/len(vals) for sender, vals in sender_sentiments.items()}
 
     return avg_sentiments
+
+
+def construct_prompt_for_sentiment_analysis(df, analysis_type):
+    """
+    Constructs a human-like prompt from the sentiment over time data with a monthly summary.
+    """
+    # Resample the data to get monthly averages
+    monthly_avg = df.resample('M').mean()
+
+    summary = "The data shows how sentiment scores vary over time in a WhatsApp group chat, summarized by month. Here are some key insights:\n"
+    for month, row in monthly_avg.iterrows():
+        sentiment_description = "positive" if row['sentiment'] > 0 else "negative" if row['sentiment'] < 0 else "neutral"
+        summary += f"- For {month.strftime('%B %Y')}, the average sentiment was {sentiment_description}, with a score of {row['sentiment']:.2f}.\n"
+
+    # Tailor the prompt based on the analysis type
+    if analysis_type == 'technical':
+        prompt = summary + "Please provide a technical explanation of what these monthly trends might suggest about the group dynamics."
+    elif analysis_type == 'fun':
+        prompt = summary + "Let's make this fun. Provide a creative and lighthearted explanation of what these monthly trends might suggest about the group dynamics."
+    elif analysis_type == 'zoeira':
+        prompt = summary + "Please provide a sarcastic and humorous analysis of the monthly data. Be bold and creative. Remember, 'The zueira never ends!'"
+    prompt += " Em português, por favor."
+
+    return prompt
+
+
+def construct_prompt_for_sentiment_analysis_old(df, analysis_type):
+    """
+    Constructs a human-like prompt from the sentiment over time data with a summary.
+    """
+    # Generate a high-level summary from the DataFrame
+    avg_sentiment = df['sentiment'].mean()
+    max_sentiment = df['sentiment'].max()
+    min_sentiment = df['sentiment'].min()
+    sentiment_description = "positive" if avg_sentiment > 0 else "negative" if avg_sentiment < 0 else "neutral"
+
+    summary = (f"The data shows how sentiment scores vary over time in a WhatsApp group chat. "
+               f"The average sentiment is generally {sentiment_description} with a mean score of {avg_sentiment:.2f}. "
+               f"The highest sentiment score recorded was {max_sentiment:.2f}, and the lowest was {min_sentiment:.2f}. ")
+
+    # Tailor the prompt based on the analysis type
+    if analysis_type == 'technical':
+        prompt = summary + "Please provide a technical explanation of what this trend might suggest about the group dynamics."
+    elif analysis_type == 'fun':
+        prompt = summary + "Let's make this fun. Provide a creative and lighthearted explanation of what this trend might suggest about the group dynamics."
+    elif analysis_type == 'zoeira':
+        prompt = summary + "Please provide a sarcastic and humorous analysis of the data. Be bold and creative (but concise). Remember, 'The zueira never ends!'"
+    prompt += " Em português, por favor."
+
+    return prompt
+
 
 def construct_shorter_prompt_from_data_avg_sentiments(avg_sentiments, type):
     """
@@ -470,17 +575,11 @@ def call_chatgpt_api(prompt, model_name, length=150, temperature=0):
 
 @app.before_request
 def limit_referer():
-    # Apply referer check only in production
     if os.environ.get('FLASK_ENV') == 'production':
         allowed_referer = "https://analisegrupal.com.br/"
         
         referer = request.headers.get('Referer')
-        
-        # logging.debug("#")
-        # logging.debug(referer)
-        # logging.debug("#")
-        
-        # Check if the Referer header matches the allowed domain
+
         if referer and not referer.startswith(allowed_referer):
             logging.debug(f'Forbiden referer: {referer} - 403')
             abort(403)  # Forbidden
@@ -488,9 +587,6 @@ def limit_referer():
 
 @app.route('/')
 def home():
-    # origin = request.headers.get('Origin') or request.headers.get('Referer')
-    # if not origin or any(allowed_host in origin for allowed_host in ALLOWED_HOSTS):
-    #     abort(403)  # Forbidden
     return jsonify({"message": "Hello, allowed host!"})
 
 
@@ -517,8 +613,6 @@ def upload_to_imgur():
         return jsonify({'error': 'No selected image'}), 400
 
     try:
-        # time.sleep(6)
-
         # Read the image and encode it in base64
         image_b64 = base64.b64encode(file.read()).decode('utf-8')
 
@@ -615,87 +709,38 @@ def is_drinking_invitation(message):
 
 @app.route('/whatsapp/message/topic_modeling', methods=['POST'])
 def topic_modeling():
-    # origin = request.headers.get('Origin') or request.headers.get('Referer')
-    # if not origin or any(allowed_host in origin for allowed_host in ALLOWED_HOSTS):
-    #     abort(403)  # Forbidden
-
-    if 'file' not in request.files:
-        return 'No file part', 400
-    file = request.files['file']
-    if file.filename == '':
-        return 'No selected file', 400
-    if not allowed_file(file.filename):
-        print("File type not allowed")
-        return 'File type not allowed', 400
+    content, error_message, error_code = process_file(request)
+    if content is None:
+        return jsonify({'status': 'error', 'message': error_message}), error_code
 
     try:
-        if zipfile.is_zipfile(file):
-            # print("Processing zip file")
-            with zipfile.ZipFile(file) as z:
-                txt_file = next((f for f in z.namelist() if f.lower().endswith('.txt')), None)
-                if txt_file is None:
-                    # print("No txt file found in the zip")
-                    return 'No txt file found in the zip', 400
-                with z.open(txt_file) as f:
-                    content = preprocess_content(decode_file(f))
-        else:
-            # print("Processing regular txt file")
-            file.seek(0)  # Reset pointer to the beginning of the file
-            _content = file.read().decode('utf-8', errors='replace').splitlines()
-            content = preprocess_content(_content)
 
-            message_pattern = re.compile(r"\d{1,2}/\d{1,2}/\d{2,4}, \d{1,2}:\d{1,2}\s[APMapm]{2} - .*?: (.*)")
-            messages = [message_pattern.search(line).group(1) if message_pattern.search(line) else None for line in content]
-            messages = [msg for msg in messages if msg is not None]
+        message_pattern = re.compile(r"\d{1,2}/\d{1,2}/\d{2,4}, \d{1,2}:\d{1,2}\s[APMapm]{2} - .*?: (.*)")
+        messages = [message_pattern.search(line).group(1) if message_pattern.search(line) else None for line in content]
+        messages = [msg for msg in messages if msg is not None]
 
-            preprocessed_messages = [preprocess(message) for message in messages]
-            lda_model, corpus, dictionary = build_lda_model(preprocessed_messages, num_topics=5)
+        preprocessed_messages = [preprocess(message) for message in messages]
+        lda_model, corpus, dictionary = build_lda_model(preprocessed_messages, num_topics=5)
 
-            vis_data = gensimvis.prepare(lda_model, corpus, dictionary)
+        vis_data = gensimvis.prepare(lda_model, corpus, dictionary)
 
-            # This will generate HTML. For a Flask route, you might want to return this HTML.
-            # Or, if you prefer, you can save this to a file and return the file path.
-            html = pyLDAvis.prepared_data_to_html(vis_data)
+        # This will generate HTML. For a Flask route, you might want to return this HTML.
+        # Or, if you prefer, you can save this to a file and return the file path.
+        html = pyLDAvis.prepared_data_to_html(vis_data)
 
-            return html  # This will directly return the visualization as an HTML page.
+        return html  # This will directly return the visualization as an HTML page.
 
     except Exception as e:
         logging.exception("An unexpected error occurred.")
         return jsonify({'status': 'error', 'message': str(e)}), 500
-    else:
-        # If no other return has been reached, provide a default response
-        logging.debug("No processing occurred, returning default response")
-        return jsonify({'status': 'error', 'message': 'No processing occurred'}), 500
 
 @app.route('/whatsapp/message/avg_sentiment_per_person', methods=['POST'])
 def plot_avg_sentiment_per_person():
-    print("Received request for avg_sentiment_per_person")
-    if 'file' not in request.files:
-        print("No file part in request")
-        return 'No file part', 400
-    file = request.files['file']
-    if file.filename == '':
-        print("No selected file")
-        return 'No selected file', 400
-    if not allowed_file(file.filename):
-        print("File type not allowed")
-        return 'File type not allowed', 400
+    content, error_message, error_code = process_file(request)
+    if content is None:
+        return jsonify({'status': 'error', 'message': error_message}), error_code
 
     try:
-        if zipfile.is_zipfile(file):
-            # print("Processing zip file")
-            with zipfile.ZipFile(file) as z:
-                txt_file = next((f for f in z.namelist() if f.lower().endswith('.txt')), None)
-                if txt_file is None:
-                    # print("No txt file found in the zip")
-                    return 'No txt file found in the zip', 400
-                with z.open(txt_file) as f:
-                    content = preprocess_content(decode_file(f))
-        else:
-            # print("Processing regular txt file")
-            file.seek(0)  # Reset pointer to the beginning of the file
-            _content = file.read().decode('utf-8', errors='replace').splitlines()
-            content = preprocess_content(_content)
 
         # print(f"@@@@@@@ Content preview: {content[:5]}")
         avg_sentiments = extract_and_analyze_sentiment(content)
@@ -735,46 +780,19 @@ def plot_avg_sentiment_per_person():
     except Exception as e:
         logging.exception("An unexpected error occurred.")
         return jsonify({'status': 'error', 'message': str(e)}), 500
-    else:
-        # If no other return has been reached, provide a default response
-        logging.debug("No processing occurred, returning default response")
-        return jsonify({'status': 'error', 'message': 'No processing occurred'}), 500
 
 
 @app.route('/whatsapp/message/avg_sentiment_per_person/analyse', methods=['POST'])
 def analyse_avg_sentiment_per_person():
-    print("Received request for avg_sentiment_per_person_analyse")
-    if 'file' not in request.files:
-        print("No file part in request")
-        return 'No file part', 400
-    file = request.files['file']
-    if file.filename == '':
-        print("No selected file")
-        return 'No selected file', 400
-    if not allowed_file(file.filename):
-        print("File type not allowed")
-        return 'File type not allowed', 400
-    
-    data = json.loads(request.form.get('data', '{}'))
-    analysis_type = data.get('type', 'technical')  # Default to 'technical' if not provided
-    temperature = data.get('temperature', 0)  # Default to 0 if not provided
+    content, error_message, error_code = process_file(request)
+    if content is None:
+        return jsonify({'status': 'error', 'message': error_message}), error_code
 
     try:
-        if zipfile.is_zipfile(file):
-            # print("Processing zip file")
-            with zipfile.ZipFile(file) as z:
-                txt_file = next((f for f in z.namelist() if f.lower().endswith('.txt')), None)
-                if txt_file is None:
-                    # print("No txt file found in the zip")
-                    return 'No txt file found in the zip', 400
-                with z.open(txt_file) as f:
-                    content = preprocess_content(decode_file(f))
-        else:
-            # print("Processing regular txt file")
-            file.seek(0)  # Reset pointer to the beginning of the file
-            _content = file.read().decode('utf-8', errors='replace').splitlines()
-            content = preprocess_content(_content)
-
+        data = json.loads(request.form.get('data', '{}'))
+        analysis_type = data.get('type', 'technical')  # Default to 'technical' if not provided
+        temperature = data.get('temperature', 0)  # Default to 0 if not provided
+        
         # print(f"@@@@@@@ Content preview: {content[:5]}")
         avg_sentiments = extract_and_analyze_sentiment(content)
 
@@ -801,43 +819,14 @@ def analyse_avg_sentiment_per_person():
     except Exception as e:
         logging.exception("An unexpected error occurred.")
         return jsonify({'status': 'error', 'message': str(e)}), 500
-    else:
-        # If no other return has been reached, provide a default response
-        logging.debug("No processing occurred, returning default response")
-        return jsonify({'status': 'error', 'message': 'No processing occurred'}), 500
 
 @app.route('/whatsapp/message/length_over_time', methods=['POST'])
 def plot_message_length_over_time():
-    # origin = request.headers.get('Origin') or request.headers.get('Referer')
-    # if not origin or any(allowed_host in origin for allowed_host in ALLOWED_HOSTS):
-    #     abort(403)  # Forbidden
-
-    # Ensure a file is uploaded with the request
-    if 'file' not in request.files:
-        return 'No file part', 400
-    file = request.files['file']
-    if file.filename == '':
-        return 'No selected file', 400
-    if not allowed_file(file.filename):
-        print("File type not allowed")
-        return 'File type not allowed', 400
+    content, error_message, error_code = process_file(request)
+    if content is None:
+        return jsonify({'status': 'error', 'message': error_message}), error_code
 
     try:
-
-        if zipfile.is_zipfile(file):
-            # print("Processing zip file")
-            with zipfile.ZipFile(file) as z:
-                txt_file = next((f for f in z.namelist() if f.lower().endswith('.txt')), None)
-                if txt_file is None:
-                    # print("No txt file found in the zip")
-                    return 'No txt file found in the zip', 400
-                with z.open(txt_file) as f:
-                    content = preprocess_content(decode_file(f))
-        else:
-            # print("Processing regular txt file")
-            file.seek(0)  # Reset pointer to the beginning of the file
-            _content = file.read().decode('utf-8', errors='replace').splitlines()
-            content = preprocess_content(_content)
 
         # print(f"Content preview: {content[:5]}")
         
@@ -885,43 +874,14 @@ def plot_message_length_over_time():
     except Exception as e:
         logging.exception("An unexpected error occurred.")
         return jsonify({'status': 'error', 'message': str(e)}), 500
-    else:
-        # If no other return has been reached, provide a default response
-        logging.debug("No processing occurred, returning default response")
-        return jsonify({'status': 'error', 'message': 'No processing occurred'}), 500
 
 @app.route('/whatsapp/message/avg_sentiment_per_person/json', methods=['POST'])
 def avg_sentiment_per_person_json():
-    # origin = request.headers.get('Origin') or request.headers.get('Referer')
-    # if not origin or any(allowed_host in origin for allowed_host in ALLOWED_HOSTS):
-    #     abort(403)  # Forbidden
-
-    # Ensure a file is uploaded with the request
-    if 'file' not in request.files:
-        return 'No file part', 400
-    file = request.files['file']
-    if file.filename == '':
-        return 'No selected file', 400
-    if not allowed_file(file.filename):
-        print("File type not allowed")
-        return 'File type not allowed', 400
+    content, error_message, error_code = process_file(request)
+    if content is None:
+        return jsonify({'status': 'error', 'message': error_message}), error_code
 
     try:
-
-        if zipfile.is_zipfile(file):
-            # print("Processing zip file")
-            with zipfile.ZipFile(file) as z:
-                txt_file = next((f for f in z.namelist() if f.lower().endswith('.txt')), None)
-                if txt_file is None:
-                    # print("No txt file found in the zip")
-                    return 'No txt file found in the zip', 400
-                with z.open(txt_file) as f:
-                    content = preprocess_content(decode_file(f))
-        else:
-            # print("Processing regular txt file")
-            file.seek(0)  # Reset pointer to the beginning of the file
-            _content = file.read().decode('utf-8', errors='replace').splitlines()
-            content = preprocess_content(_content)
 
         # Regular expression to extract timestamp, sender and messages
         message_pattern = re.compile(r"\d{1,2}/\d{1,2}/\d{2,4}, \d{1,2}:\d{1,2}\s[APMapm]{2} - (.*?): (.*)")
@@ -946,44 +906,19 @@ def avg_sentiment_per_person_json():
     except Exception as e:
         logging.exception("An unexpected error occurred.")
         return jsonify({'status': 'error', 'message': str(e)}), 500
-    else:
-        # If no other return has been reached, provide a default response
-        logging.debug("No processing occurred, returning default response")
-        return jsonify({'status': 'error', 'message': 'No processing occurred'}), 500
 
 
 @app.route('/whatsapp/message/sentiment_over_time', methods=['POST'])
 def plot_sentiment_over_time():
-    # origin = request.headers.get('Origin') or request.headers.get('Referer')
-    # if not origin or any(allowed_host in origin for allowed_host in ALLOWED_HOSTS):
-    #     abort(403)  # Forbidden
+    content, error_message, error_code = process_file(request)
+    if content is None:
+        return jsonify({'status': 'error', 'message': error_message}), error_code
 
-    # Ensure a file is uploaded with the request
-    if 'file' not in request.files:
-        return 'No file part', 400
-    file = request.files['file']
-    if file.filename == '':
-        return 'No selected file', 400
-    if not allowed_file(file.filename):
-        print("File type not allowed")
-        return 'File type not allowed', 400
+    df, error_message = extract_and_process_sentiments(content)
+    if df is None:
+        return jsonify({'status': 'error', 'message': error_message}), 400
 
     try:
-
-        if zipfile.is_zipfile(file):
-            # print("Processing zip file")
-            with zipfile.ZipFile(file) as z:
-                txt_file = next((f for f in z.namelist() if f.lower().endswith('.txt')), None)
-                if txt_file is None:
-                    # print("No txt file found in the zip")
-                    return 'No txt file found in the zip', 400
-                with z.open(txt_file) as f:
-                    content = preprocess_content(decode_file(f))
-        else:
-            # print("Processing regular txt file")
-            file.seek(0)  # Reset pointer to the beginning of the file
-            _content = file.read().decode('utf-8', errors='replace').splitlines()
-            content = preprocess_content(_content)
         
         # Regular expression to extract timestamp and messages
         message_pattern = re.compile(r"(\d{1,2}/\d{1,2}/\d{2,4}, \d{1,2}:\d{1,2}\s[APMapm]{2}) - .*?: (.*)")
@@ -1030,43 +965,46 @@ def plot_sentiment_over_time():
     except Exception as e:
         logging.exception("An unexpected error occurred.")
         return jsonify({'status': 'error', 'message': str(e)}), 500
-    else:
-        # If no other return has been reached, provide a default response
-        logging.debug("No processing occurred, returning default response")
-        return jsonify({'status': 'error', 'message': 'No processing occurred'}), 500
+
+
+@app.route('/whatsapp/message/sentiment_over_time/analyse', methods=['POST'])
+def analyse_sentiment_over_time():
+    content, error_message, error_code = process_file(request)
+    if content is None:
+        return jsonify({'status': 'error', 'message': error_message}), error_code
+
+    try:
+        data = json.loads(request.form.get('data', '{}'))
+        analysis_type = data.get('type', 'technical')  # Default to 'technical' if not provided
+        temperature = data.get('temperature', 0)  # Default to 0 if not provided
+
+        df, error_message = extract_and_process_sentiments(content)
+        if df is None or df.empty:
+            return jsonify({'status': 'error', 'message': error_message or "No data available for analysis"}), 400
+
+        # Construct a prompt for the ChatGPT API based on the sentiment data
+        prompt = construct_prompt_for_sentiment_analysis(df, analysis_type)
+
+        print(prompt)
+
+        length = 350 if analysis_type == 'technical' else 400 if analysis_type == 'fun' else 500 if analysis_type == 'zoeira' else 300
+        chatgpt_response = call_chatgpt_api(prompt, "gpt-3.5-turbo", length, temperature)
+
+        # Returning the ChatGPT API response
+        return jsonify(chatgpt_response)
+    
+    except Exception as e:
+        logging.exception("An unexpected error occurred.")
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
 
 @app.route('/whatsapp/message/peak_response_time', methods=['POST'])
 def analyze_peak_response_time():
-    # origin = request.headers.get('Origin') or request.headers.get('Referer')
-    # if not origin or any(allowed_host in origin for allowed_host in ALLOWED_HOSTS):
-    #     abort(403)  # Forbidden
-
-    # Ensure a file is uploaded with the request
-    if 'file' not in request.files:
-        return 'No file part', 400
-    file = request.files['file']
-    if file.filename == '':
-        return 'No selected file', 400
-    if not allowed_file(file.filename):
-        print("File type not allowed")
-        return 'File type not allowed', 400
+    content, error_message, error_code = process_file(request)
+    if content is None:
+        return jsonify({'status': 'error', 'message': error_message}), error_code
 
     try:
-
-        if zipfile.is_zipfile(file):
-            # print("Processing zip file")
-            with zipfile.ZipFile(file) as z:
-                txt_file = next((f for f in z.namelist() if f.lower().endswith('.txt')), None)
-                if txt_file is None:
-                    # print("No txt file found in the zip")
-                    return 'No txt file found in the zip', 400
-                with z.open(txt_file) as f:
-                    content = preprocess_content(decode_file(f))
-        else:
-            # print("Processing regular txt file")
-            file.seek(0)  # Reset pointer to the beginning of the file
-            _content = file.read().decode('utf-8', errors='replace').splitlines()
-            content = preprocess_content(_content)
 
         # print(content[:10])  # Print the first 10 lines
 
@@ -1150,43 +1088,14 @@ def analyze_peak_response_time():
     except Exception as e:
         logging.exception("An unexpected error occurred.")
         return jsonify({'status': 'error', 'message': str(e)}), 500
-    else:
-        # If no other return has been reached, provide a default response
-        logging.debug("No processing occurred, returning default response")
-        return jsonify({'status': 'error', 'message': 'No processing occurred'}), 500
 
 @app.route('/whatsapp/message/peak_response_time/json', methods=['POST'])
 def analyze_peak_response_time_json():
-    # origin = request.headers.get('Origin') or request.headers.get('Referer')
-    # if not origin or any(allowed_host in origin for allowed_host in ALLOWED_HOSTS):
-    #     abort(403)  # Forbidden
-
-    # Ensure a file is uploaded with the request
-    if 'file' not in request.files:
-        return 'No file part', 400
-    file = request.files['file']
-    if file.filename == '':
-        return 'No selected file', 400
-    if not allowed_file(file.filename):
-        print("File type not allowed")
-        return 'File type not allowed', 400
+    content, error_message, error_code = process_file(request)
+    if content is None:
+        return jsonify({'status': 'error', 'message': error_message}), error_code
 
     try:
-
-        if zipfile.is_zipfile(file):
-            # print("Processing zip file")
-            with zipfile.ZipFile(file) as z:
-                txt_file = next((f for f in z.namelist() if f.lower().endswith('.txt')), None)
-                if txt_file is None:
-                    # print("No txt file found in the zip")
-                    return 'No txt file found in the zip', 400
-                with z.open(txt_file) as f:
-                    content = preprocess_content(decode_file(f))
-        else:
-            # print("Processing regular txt file")
-            file.seek(0)  # Reset pointer to the beginning of the file
-            _content = file.read().decode('utf-8', errors='replace').splitlines()
-            content = preprocess_content(_content)
 
         # Define a regex pattern to extract the timestamp and sender's name
         timestamp_pattern = re.compile(r"(\d{1,2}/\d{1,2}/\d{2,4}, \d{1,2}:\d{1,2}\u202f[APMapm]{2}) - (.*?):")
@@ -1226,44 +1135,15 @@ def analyze_peak_response_time_json():
     except Exception as e:
         logging.exception("An unexpected error occurred.")
         return jsonify({'status': 'error', 'message': str(e)}), 500
-    else:
-        # If no other return has been reached, provide a default response
-        logging.debug("No processing occurred, returning default response")
-        return jsonify({'status': 'error', 'message': 'No processing occurred'}), 500
 
 
 @app.route('/whatsapp/message/activity_heatmap', methods=['POST'])
 def activity_heatmap():
-    # origin = request.headers.get('Origin') or request.headers.get('Referer')
-    # if not origin or any(allowed_host in origin for allowed_host in ALLOWED_HOSTS):
-    #     abort(403)  # Forbidden
-
-    # Ensure a file is uploaded with the request
-    if 'file' not in request.files:
-        return 'No file part', 400
-    file = request.files['file']
-    if file.filename == '':
-        return 'No selected file', 400
-    if not allowed_file(file.filename):
-        print("File type not allowed")
-        return 'File type not allowed', 400
+    content, error_message, error_code = process_file(request)
+    if content is None:
+        return jsonify({'status': 'error', 'message': error_message}), error_code
 
     try:
-
-        if zipfile.is_zipfile(file):
-            # print("Processing zip file")
-            with zipfile.ZipFile(file) as z:
-                txt_file = next((f for f in z.namelist() if f.lower().endswith('.txt')), None)
-                if txt_file is None:
-                    # print("No txt file found in the zip")
-                    return 'No txt file found in the zip', 400
-                with z.open(txt_file) as f:
-                    content = preprocess_content(decode_file(f))
-        else:
-            # print("Processing regular txt file")
-            file.seek(0)  # Reset pointer to the beginning of the file
-            _content = file.read().decode('utf-8', errors='replace').splitlines()
-            content = preprocess_content(_content)
 
         # Define a regex pattern to extract date and time details
         date_time_pattern = re.compile(r"(\d{1,2}/\d{1,2}/\d{2,4}), (\d{1,2}:\d{1,2})\s[APMapm]{2}")
@@ -1305,43 +1185,14 @@ def activity_heatmap():
     except Exception as e:
         logging.exception("An unexpected error occurred.")
         return jsonify({'status': 'error', 'message': str(e)}), 500
-    else:
-        # If no other return has been reached, provide a default response
-        logging.debug("No processing occurred, returning default response")
-        return jsonify({'status': 'error', 'message': 'No processing occurred'}), 500
 
 @app.route('/whatsapp/message/user_activity_over_time', methods=['POST'])
 def user_activity_over_time():
-    # origin = request.headers.get('Origin') or request.headers.get('Referer')
-    # if not origin or any(allowed_host in origin for allowed_host in ALLOWED_HOSTS):
-    #     abort(403)  # Forbidden
-
-    # Ensure a file is uploaded with the request
-    if 'file' not in request.files:
-        return 'No file part', 400
-    file = request.files['file']
-    if file.filename == '':
-        return 'No selected file', 400
-    if not allowed_file(file.filename):
-        print("File type not allowed")
-        return 'File type not allowed', 400
+    content, error_message, error_code = process_file(request)
+    if content is None:
+        return jsonify({'status': 'error', 'message': error_message}), error_code
 
     try:
-
-        if zipfile.is_zipfile(file):
-            # print("Processing zip file")
-            with zipfile.ZipFile(file) as z:
-                txt_file = next((f for f in z.namelist() if f.lower().endswith('.txt')), None)
-                if txt_file is None:
-                    # print("No txt file found in the zip")
-                    return 'No txt file found in the zip', 400
-                with z.open(txt_file) as f:
-                    content = preprocess_content(decode_file(f))
-        else:
-            # print("Processing regular txt file")
-            file.seek(0)  # Reset pointer to the beginning of the file
-            _content = file.read().decode('utf-8', errors='replace').splitlines()
-            content = preprocess_content(_content)
 
         # Define a regex pattern to extract the date and participant names
         message_pattern = re.compile(r"(\d{1,2}/\d{1,2}/\d{2,4}), \d{1,2}:\d{1,2}\s[APMapm]{2} - (.*?): .*")
@@ -1376,43 +1227,14 @@ def user_activity_over_time():
     except Exception as e:
         logging.exception("An unexpected error occurred.")
         return jsonify({'status': 'error', 'message': str(e)}), 500
-    else:
-        # If no other return has been reached, provide a default response
-        logging.debug("No processing occurred, returning default response")
-        return jsonify({'status': 'error', 'message': 'No processing occurred'}), 500
 
 @app.route('/whatsapp/message/top_emojis_json/<int:top_n>', methods=['POST'])
 def get_top_emojis_json(top_n=10):
-    # origin = request.headers.get('Origin') or request.headers.get('Referer')
-    # if not origin or any(allowed_host in origin for allowed_host in ALLOWED_HOSTS):
-    #     abort(403)  # Forbidden
-
-    # Ensure a file is uploaded with the request
-    if 'file' not in request.files:
-        return 'No file part', 400
-    file = request.files['file']
-    if file.filename == '':
-        return 'No selected file', 400
-    if not allowed_file(file.filename):
-        print("File type not allowed")
-        return 'File type not allowed', 400
+    content, error_message, error_code = process_file(request)
+    if content is None:
+        return jsonify({'status': 'error', 'message': error_message}), error_code
 
     try:
-
-        if zipfile.is_zipfile(file):
-            # print("Processing zip file")
-            with zipfile.ZipFile(file) as z:
-                txt_file = next((f for f in z.namelist() if f.lower().endswith('.txt')), None)
-                if txt_file is None:
-                    # print("No txt file found in the zip")
-                    return 'No txt file found in the zip', 400
-                with z.open(txt_file) as f:
-                    content = preprocess_content(decode_file(f))
-        else:
-            # print("Processing regular txt file")
-            file.seek(0)  # Reset pointer to the beginning of the file
-            _content = file.read().decode('utf-8', errors='replace').splitlines()
-            content = preprocess_content(_content)
 
         # Define a regex pattern to extract the message content
         message_pattern = re.compile(r"\d{1,2}/\d{1,2}/\d{2,4}, \d{1,2}:\d{1,2}\s[APMapm]{2} - .*?: (.*)")
@@ -1434,10 +1256,6 @@ def get_top_emojis_json(top_n=10):
     except Exception as e:
         logging.exception("An unexpected error occurred.")
         return jsonify({'status': 'error', 'message': str(e)}), 500
-    else:
-        # If no other return has been reached, provide a default response
-        logging.debug("No processing occurred, returning default response")
-        return jsonify({'status': 'error', 'message': 'No processing occurred'}), 500
 
 # Conversational Turn Analysis
 # In a group chat, it's interesting to see how often the conversation "turns" 
@@ -1448,36 +1266,11 @@ def get_top_emojis_json(top_n=10):
 # chiming in frequently.
 @app.route('/whatsapp/message/conversational_turns', methods=['POST'])
 def plot_conversational_turns():
-    # origin = request.headers.get('Origin') or request.headers.get('Referer')
-    # if not origin or any(allowed_host in origin for allowed_host in ALLOWED_HOSTS):
-    #     abort(403)  # Forbidden
-
-    # Ensure a file is uploaded with the request
-    if 'file' not in request.files:
-        return 'No file part', 400
-    file = request.files['file']
-    if file.filename == '':
-        return 'No selected file', 400
-    if not allowed_file(file.filename):
-        print("File type not allowed")
-        return 'File type not allowed', 400
+    content, error_message, error_code = process_file(request)
+    if content is None:
+        return jsonify({'status': 'error', 'message': error_message}), error_code
 
     try:
-
-        if zipfile.is_zipfile(file):
-            # print("Processing zip file")
-            with zipfile.ZipFile(file) as z:
-                txt_file = next((f for f in z.namelist() if f.lower().endswith('.txt')), None)
-                if txt_file is None:
-                    # print("No txt file found in the zip")
-                    return 'No txt file found in the zip', 400
-                with z.open(txt_file) as f:
-                    content = preprocess_content(decode_file(f))
-        else:
-            # print("Processing regular txt file")
-            file.seek(0)  # Reset pointer to the beginning of the file
-            _content = file.read().decode('utf-8', errors='replace').splitlines()
-            content = preprocess_content(_content)
 
         # Define a regex pattern to extract the sender of each message
         sender_pattern = re.compile(r"\d{1,2}/\d{1,2}/\d{2,4}, \d{1,2}:\d{1,2}\s[APMapm]{2} - (.*?):")
@@ -1525,45 +1318,16 @@ def plot_conversational_turns():
     except Exception as e:
         logging.exception("An unexpected error occurred.")
         return jsonify({'status': 'error', 'message': str(e)}), 500
-    else:
-        # If no other return has been reached, provide a default response
-        logging.debug("No processing occurred, returning default response")
-        return jsonify({'status': 'error', 'message': 'No processing occurred'}), 500
 
 
 # WEIRD
 @app.route('/whatsapp/message/mention_analysis', methods=['POST'])
 def mention_analysis():
-    # origin = request.headers.get('Origin') or request.headers.get('Referer')
-    # if not origin or any(allowed_host in origin for allowed_host in ALLOWED_HOSTS):
-    #     abort(403)  # Forbidden
-
-    # Ensure a file is uploaded with the request
-    if 'file' not in request.files:
-        return 'No file part', 400
-    file = request.files['file']
-    if file.filename == '':
-        return 'No selected file', 400
-    if not allowed_file(file.filename):
-        print("File type not allowed")
-        return 'File type not allowed', 400
+    content, error_message, error_code = process_file(request)
+    if content is None:
+        return jsonify({'status': 'error', 'message': error_message}), error_code
 
     try:
-
-        if zipfile.is_zipfile(file):
-            # print("Processing zip file")
-            with zipfile.ZipFile(file) as z:
-                txt_file = next((f for f in z.namelist() if f.lower().endswith('.txt')), None)
-                if txt_file is None:
-                    # print("No txt file found in the zip")
-                    return 'No txt file found in the zip', 400
-                with z.open(txt_file) as f:
-                    content = preprocess_content(decode_file(f))
-        else:
-            # print("Processing regular txt file")
-            file.seek(0)  # Reset pointer to the beginning of the file
-            _content = file.read().decode('utf-8', errors='replace').splitlines()
-            content = preprocess_content(_content)
 
         # Regular expression to extract sender and messages
         message_pattern = re.compile(r"\d{1,2}/\d{1,2}/\d{2,4}, \d{1,2}:\d{1,2}\s[APMapm]{2} - (.*?): (.*)")
@@ -1601,44 +1365,15 @@ def mention_analysis():
     except Exception as e:
         logging.exception("An unexpected error occurred.")
         return jsonify({'status': 'error', 'message': str(e)}), 500
-    else:
-        # If no other return has been reached, provide a default response
-        logging.debug("No processing occurred, returning default response")
-        return jsonify({'status': 'error', 'message': 'No processing occurred'}), 500
 
 
 @app.route('/whatsapp/message/active_days', methods=['POST'])
 def plot_active_days():
-    # origin = request.headers.get('Origin') or request.headers.get('Referer')
-    # if not origin or any(allowed_host in origin for allowed_host in ALLOWED_HOSTS):
-    #     abort(403)  # Forbidden
-
-    # Ensure a file is uploaded with the request
-    if 'file' not in request.files:
-        return 'No file part', 400
-    file = request.files['file']
-    if file.filename == '':
-        return 'No selected file', 400
-    if not allowed_file(file.filename):
-        print("File type not allowed")
-        return 'File type not allowed', 400
+    content, error_message, error_code = process_file(request)
+    if content is None:
+        return jsonify({'status': 'error', 'message': error_message}), error_code
 
     try:
-
-        if zipfile.is_zipfile(file):
-            # print("Processing zip file")
-            with zipfile.ZipFile(file) as z:
-                txt_file = next((f for f in z.namelist() if f.lower().endswith('.txt')), None)
-                if txt_file is None:
-                    # print("No txt file found in the zip")
-                    return 'No txt file found in the zip', 400
-                with z.open(txt_file) as f:
-                    content = preprocess_content(decode_file(f))
-        else:
-            # print("Processing regular txt file")
-            file.seek(0)  # Reset pointer to the beginning of the file
-            _content = file.read().decode('utf-8', errors='replace').splitlines()
-            content = preprocess_content(_content)
 
         # Define a regex pattern to extract the date of each message
         date_pattern = re.compile(r"(\d{1,2}/\d{1,2}/\d{2,4}), \d{1,2}:\d{1,2}\s[APMapm]{2} - .*?:")
@@ -1674,43 +1409,14 @@ def plot_active_days():
     except Exception as e:
         logging.exception("An unexpected error occurred.")
         return jsonify({'status': 'error', 'message': str(e)}), 500
-    else:
-        # If no other return has been reached, provide a default response
-        logging.debug("No processing occurred, returning default response")
-        return jsonify({'status': 'error', 'message': 'No processing occurred'}), 500
 
 @app.route('/whatsapp/message/topic_percentage', methods=['POST'])
 def topic_percentage():
-    # origin = request.headers.get('Origin') or request.headers.get('Referer')
-    # if not origin or any(allowed_host in origin for allowed_host in ALLOWED_HOSTS):
-    #     abort(403)  # Forbidden
-
-    # Ensure a file is uploaded with the request
-    if 'file' not in request.files:
-        return 'No file part', 400
-    file = request.files['file']
-    if file.filename == '':
-        return 'No selected file', 400
-    if not allowed_file(file.filename):
-        print("File type not allowed")
-        return 'File type not allowed', 400
+    content, error_message, error_code = process_file(request)
+    if content is None:
+        return jsonify({'status': 'error', 'message': error_message}), error_code
 
     try:
-
-        if zipfile.is_zipfile(file):
-            # print("Processing zip file")
-            with zipfile.ZipFile(file) as z:
-                txt_file = next((f for f in z.namelist() if f.lower().endswith('.txt')), None)
-                if txt_file is None:
-                    # print("No txt file found in the zip")
-                    return 'No txt file found in the zip', 400
-                with z.open(txt_file) as f:
-                    content = preprocess_content(decode_file(f))
-        else:
-            # print("Processing regular txt file")
-            file.seek(0)  # Reset pointer to the beginning of the file
-            _content = file.read().decode('utf-8', errors='replace').splitlines()
-            content = preprocess_content(_content)
         
         # Extract messages from the content
         message_pattern = re.compile(r"\d{1,2}/\d{1,2}/\d{2,4}, \d{1,2}:\d{1,2}\s[APMapm]{2} - .*?: (.*)")
@@ -1747,44 +1453,15 @@ def topic_percentage():
     except Exception as e:
         logging.exception("An unexpected error occurred.")
         return jsonify({'status': 'error', 'message': str(e)}), 500
-    else:
-        # If no other return has been reached, provide a default response
-        logging.debug("No processing occurred, returning default response")
-        return jsonify({'status': 'error', 'message': 'No processing occurred'}), 500
 
 
 @app.route('/whatsapp/message/topic_percentage/json', methods=['POST'])
 def topic_percentage_json():
-    # origin = request.headers.get('Origin') or request.headers.get('Referer')
-    # if not origin or any(allowed_host in origin for allowed_host in ALLOWED_HOSTS):
-    #     abort(403)  # Forbidden
-
-    # Ensure a file is uploaded with the request
-    if 'file' not in request.files:
-        return 'No file part', 400
-    file = request.files['file']
-    if file.filename == '':
-        return 'No selected file', 400
-    if not allowed_file(file.filename):
-        print("File type not allowed")
-        return 'File type not allowed', 400
+    content, error_message, error_code = process_file(request)
+    if content is None:
+        return jsonify({'status': 'error', 'message': error_message}), error_code
 
     try:
-
-        if zipfile.is_zipfile(file):
-            # print("Processing zip file")
-            with zipfile.ZipFile(file) as z:
-                txt_file = next((f for f in z.namelist() if f.lower().endswith('.txt')), None)
-                if txt_file is None:
-                    # print("No txt file found in the zip")
-                    return 'No txt file found in the zip', 400
-                with z.open(txt_file) as f:
-                    content = preprocess_content(decode_file(f))
-        else:
-            # print("Processing regular txt file")
-            file.seek(0)  # Reset pointer to the beginning of the file
-            _content = file.read().decode('utf-8', errors='replace').splitlines()
-            content = preprocess_content(_content)
 
         # Extract messages from the content
         message_pattern = re.compile(r"\d{1,2}/\d{1,2}/\d{2,4}, \d{1,2}:\d{1,2}\s[APMapm]{2} - .*?: (.*)")
@@ -1820,44 +1497,15 @@ def topic_percentage_json():
     except Exception as e:
         logging.exception("An unexpected error occurred.")
         return jsonify({'status': 'error', 'message': str(e)}), 500
-    else:
-        # If no other return has been reached, provide a default response
-        logging.debug("No processing occurred, returning default response")
-        return jsonify({'status': 'error', 'message': 'No processing occurred'}), 500
 
 
 @app.route('/whatsapp/message/wordfrequency/<int:top_words>', methods=['POST'])
 def plot_word_frequency(top_words=20):
-    # origin = request.headers.get('Origin') or request.headers.get('Referer')
-    # if not origin or any(allowed_host in origin for allowed_host in ALLOWED_HOSTS):
-    #     abort(403)  # Forbidden
-
-    # Ensure a file is uploaded with the request
-    if 'file' not in request.files:
-        return 'No file part', 400
-    file = request.files['file']
-    if file.filename == '':
-        return 'No selected file', 400
-    if not allowed_file(file.filename):
-        print("File type not allowed")
-        return 'File type not allowed', 400
+    content, error_message, error_code = process_file(request)
+    if content is None:
+        return jsonify({'status': 'error', 'message': error_message}), error_code
 
     try:
-
-        if zipfile.is_zipfile(file):
-            # print("Processing zip file")
-            with zipfile.ZipFile(file) as z:
-                txt_file = next((f for f in z.namelist() if f.lower().endswith('.txt')), None)
-                if txt_file is None:
-                    # print("No txt file found in the zip")
-                    return 'No txt file found in the zip', 400
-                with z.open(txt_file) as f:
-                    content = preprocess_content(decode_file(f))
-        else:
-            # print("Processing regular txt file")
-            file.seek(0)  # Reset pointer to the beginning of the file
-            _content = file.read().decode('utf-8', errors='replace').splitlines()
-            content = preprocess_content(_content)
 
         # Define a regex pattern to extract the content of each message
         message_pattern = re.compile(r"\d{1,2}/\d{1,2}/\d{2,4}, \d{1,2}:\d{1,2}\s[APMapm]{2} - .*?: (.*)")
@@ -1896,43 +1544,16 @@ def plot_word_frequency(top_words=20):
     except Exception as e:
         logging.exception("An unexpected error occurred.")
         return jsonify({'status': 'error', 'message': str(e)}), 500
-    else:
-        # If no other return has been reached, provide a default response
-        logging.debug("No processing occurred, returning default response")
-        return jsonify({'status': 'error', 'message': 'No processing occurred'}), 500
 
 
 @app.route('/whatsapp/message/wordcloud', methods=['POST'])
 def plot_cleaned_wordcloud():
-    # origin = request.headers.get('Origin') or request.headers.get('Referer')
-    # if not origin or any(allowed_host in origin for allowed_host in ALLOWED_HOSTS):
-    #     abort(403)  # Forbidden
 
-    if 'file' not in request.files:
-        return 'No file part', 400
-    file = request.files['file']
-    if file.filename == '':
-        return 'No selected file', 400
-    if not allowed_file(file.filename):
-        logging.debug("File type not allowed")
-        return 'File type not allowed', 400
+    content, error_message, error_code = process_file(request)
+    if content is None:
+        return jsonify({'status': 'error', 'message': error_message}), error_code
 
     try:
-
-        if zipfile.is_zipfile(file):
-            # print("Processing zip file")
-            with zipfile.ZipFile(file) as z:
-                txt_file = next((f for f in z.namelist() if f.lower().endswith('.txt')), None)
-                if txt_file is None:
-                    # print("No txt file found in the zip")
-                    return 'No txt file found in the zip', 400
-                with z.open(txt_file) as f:
-                    content = preprocess_content(decode_file(f))
-        else:
-            # print("Processing regular txt file")
-            file.seek(0)  # Reset pointer to the beginning of the file
-            _content = file.read().decode('utf-8', errors='replace').splitlines()
-            content = preprocess_content(_content)
 
         # Regular expression to extract the message content
         message_pattern = re.compile(r"\d{1,2}/\d{1,2}/\d{2,4}, \d{1,2}:\d{1,2}\s[APMapm]{2} - .*?: (.*)")
@@ -1973,43 +1594,14 @@ def plot_cleaned_wordcloud():
     except Exception as e:
         logging.exception("An unexpected error occurred.")
         return jsonify({'status': 'error', 'message': str(e)}), 500
-    else:
-        # If no other return has been reached, provide a default response
-        logging.debug("No processing occurred, returning default response")
-        return jsonify({'status': 'error', 'message': 'No processing occurred'}), 500
 
 @app.route('/whatsapp/message/lenghiest/top/<int:top_contributors>', methods=['POST'])
 def plot_lengthiest_messages_pie_chart(top_contributors):
-    # origin = request.headers.get('Origin') or request.headers.get('Referer')
-    # if not origin or any(allowed_host in origin for allowed_host in ALLOWED_HOSTS):
-    #     abort(403)  # Forbidden
-
-    # Ensure a file is uploaded with the request
-    if 'file' not in request.files:
-        return 'No file part', 400
-    file = request.files['file']
-    if file.filename == '':
-        return 'No selected file', 400
-    if not allowed_file(file.filename):
-        print("File type not allowed")
-        return 'File type not allowed', 400
+    content, error_message, error_code = process_file(request)
+    if content is None:
+        return jsonify({'status': 'error', 'message': error_message}), error_code
 
     try:
-
-        if zipfile.is_zipfile(file):
-            # print("Processing zip file")
-            with zipfile.ZipFile(file) as z:
-                txt_file = next((f for f in z.namelist() if f.lower().endswith('.txt')), None)
-                if txt_file is None:
-                    # print("No txt file found in the zip")
-                    return 'No txt file found in the zip', 400
-                with z.open(txt_file) as f:
-                    content = preprocess_content(decode_file(f))
-        else:
-            # print("Processing regular txt file")
-            file.seek(0)  # Reset pointer to the beginning of the file
-            _content = file.read().decode('utf-8', errors='replace').splitlines()
-            content = preprocess_content(_content)
 
         # Define a regex pattern to extract participant names and their messages
         message_pattern = re.compile(r"\d{1,2}/\d{1,2}/\d{2,4}, \d{1,2}:\d{1,2}\s[APMapm]{2} - (.*?): (.*)")
@@ -2053,44 +1645,15 @@ def plot_lengthiest_messages_pie_chart(top_contributors):
     except Exception as e:
         logging.exception("An unexpected error occurred.")
         return jsonify({'status': 'error', 'message': str(e)}), 500
-    else:
-        # If no other return has been reached, provide a default response
-        logging.debug("No processing occurred, returning default response")
-        return jsonify({'status': 'error', 'message': 'No processing occurred'}), 500
 
 
 @app.route('/whatsapp/message/sentiment/distribution', methods=['POST'])
 def plot_sentiment_distribution():
-    # origin = request.headers.get('Origin') or request.headers.get('Referer')
-    # if not origin or any(allowed_host in origin for allowed_host in ALLOWED_HOSTS):
-    #     abort(403)  # Forbidden
-
-    # Ensure a file is uploaded with the request
-    if 'file' not in request.files:
-        return 'No file part', 400
-    file = request.files['file']
-    if file.filename == '':
-        return 'No selected file', 400
-    if not allowed_file(file.filename):
-        print("File type not allowed")
-        return 'File type not allowed', 400
+    content, error_message, error_code = process_file(request)
+    if content is None:
+        return jsonify({'status': 'error', 'message': error_message}), error_code
 
     try:
-
-        if zipfile.is_zipfile(file):
-            # print("Processing zip file")
-            with zipfile.ZipFile(file) as z:
-                txt_file = next((f for f in z.namelist() if f.lower().endswith('.txt')), None)
-                if txt_file is None:
-                    # print("No txt file found in the zip")
-                    return 'No txt file found in the zip', 400
-                with z.open(txt_file) as f:
-                    content = preprocess_content(decode_file(f))
-        else:
-            # print("Processing regular txt file")
-            file.seek(0)  # Reset pointer to the beginning of the file
-            _content = file.read().decode('utf-8', errors='replace').splitlines()
-            content = preprocess_content(_content)
 
         # Define a regex pattern to extract the content of each message
         message_pattern = re.compile(r"\d{1,2}/\d{1,2}/\d{2,4}, \d{1,2}:\d{1,2}\s[APMapm]{2} - .*?: (.*)")
@@ -2130,44 +1693,15 @@ def plot_sentiment_distribution():
     except Exception as e:
         logging.exception("An unexpected error occurred.")
         return jsonify({'status': 'error', 'message': str(e)}), 500
-    else:
-        # If no other return has been reached, provide a default response
-        logging.debug("No processing occurred, returning default response")
-        return jsonify({'status': 'error', 'message': 'No processing occurred'}), 500
 
 
 @app.route('/whatsapp/message/heatmap', methods=['POST'])
 def plot_hourly_heatmap():
-    # origin = request.headers.get('Origin') or request.headers.get('Referer')
-    # if not origin or any(allowed_host in origin for allowed_host in ALLOWED_HOSTS):
-    #     abort(403)  # Forbidden
-
-    # Read the file content
-    if 'file' not in request.files:
-        return 'No file part', 400
-    file = request.files['file']
-    if file.filename == '':
-        return 'No selected file', 400
-    if not allowed_file(file.filename):
-        print("File type not allowed")
-        return 'File type not allowed', 400
+    content, error_message, error_code = process_file(request)
+    if content is None:
+        return jsonify({'status': 'error', 'message': error_message}), error_code
 
     try:
-
-        if zipfile.is_zipfile(file):
-            # print("Processing zip file")
-            with zipfile.ZipFile(file) as z:
-                txt_file = next((f for f in z.namelist() if f.lower().endswith('.txt')), None)
-                if txt_file is None:
-                    # print("No txt file found in the zip")
-                    return 'No txt file found in the zip', 400
-                with z.open(txt_file) as f:
-                    content = preprocess_content(decode_file(f))
-        else:
-            # print("Processing regular txt file")
-            file.seek(0)  # Reset pointer to the beginning of the file
-            _content = file.read().decode('utf-8', errors='replace').splitlines()
-            content = preprocess_content(_content)
 
         # Extract hour along with the AM/PM marker using regex
         hour_ampm_pattern = re.compile(r"\d{1,2}/\d{1,2}/\d{2,4}, (\d{1,2}:\d{1,2}\s[APMapm]{2}) - .*?:")
@@ -2221,46 +1755,19 @@ def plot_hourly_heatmap():
     except Exception as e:
         logging.exception("An unexpected error occurred.")
         return jsonify({'status': 'error', 'message': str(e)}), 500
-    else:
-        # If no other return has been reached, provide a default response
-        logging.debug("No processing occurred, returning default response")
-        return jsonify({'status': 'error', 'message': 'No processing occurred'}), 500
 
 @app.route('/whatsapp/message/usercount', methods=['POST'])
 def user_message_count():
-    # origin = request.headers.get('Origin') or request.headers.get('Referer')
-    # if not origin or any(allowed_host in origin for allowed_host in ALLOWED_HOSTS):
-    #     abort(403)  # Forbidden
 
     # Initialize a dictionary to store the names and their message counts
     message_counts = defaultdict(int)
 
     # Check if a file was posted
-    if 'file' not in request.files:
-        return 'No file part', 400
-    file = request.files['file']
-    if file.filename == '':
-        return 'No selected file', 400
-    if not allowed_file(file.filename):
-        print("File type not allowed")
-        return 'File type not allowed', 400
+    content, error_message, error_code = process_file(request)
+    if content is None:
+        return jsonify({'status': 'error', 'message': error_message}), error_code
 
     try:
-
-        if zipfile.is_zipfile(file):
-            # print("Processing zip file")
-            with zipfile.ZipFile(file) as z:
-                txt_file = next((f for f in z.namelist() if f.lower().endswith('.txt')), None)
-                if txt_file is None:
-                    # print("No txt file found in the zip")
-                    return 'No txt file found in the zip', 400
-                with z.open(txt_file) as f:
-                    content = preprocess_content(decode_file(f))
-        else:
-            # print("Processing regular txt file")
-            file.seek(0)  # Reset pointer to the beginning of the file
-            _content = file.read().decode('utf-8', errors='replace').splitlines()
-            content = preprocess_content(_content)
 
         # Regular expression to extract the name pattern from a typical line
         name_pattern = re.compile(r"\d{1,2}/\d{1,2}/\d{2,4}, \d{1,2}:\d{1,2}\s[APMapm]{2} - (.*?):")
@@ -2305,44 +1812,15 @@ def user_message_count():
     except Exception as e:
         logging.exception("An unexpected error occurred.")
         return jsonify({'status': 'error', 'message': str(e)}), 500
-    else:
-        # If no other return has been reached, provide a default response
-        logging.debug("No processing occurred, returning default response")
-        return jsonify({'status': 'error', 'message': 'No processing occurred'}), 500
 
 
 @app.route('/whatsapp/message/activeusers/<int:num_users>', methods=['POST'])
 def most_active_users(num_users):
-    # origin = request.headers.get('Origin') or request.headers.get('Referer')
-    # if not origin or any(allowed_host in origin for allowed_host in ALLOWED_HOSTS):
-    #     abort(403)  # Forbidden
-
-    # Ensure a file is uploaded with the request
-    if 'file' not in request.files:
-        return 'No file part', 400
-    file = request.files['file']
-    if file.filename == '':
-        return 'No selected file', 400
-    if not allowed_file(file.filename):
-        print("File type not allowed")
-        return 'File type not allowed', 400
+    content, error_message, error_code = process_file(request)
+    if content is None:
+        return jsonify({'status': 'error', 'message': error_message}), error_code
 
     try:
-
-        if zipfile.is_zipfile(file):
-            # print("Processing zip file")
-            with zipfile.ZipFile(file) as z:
-                txt_file = next((f for f in z.namelist() if f.lower().endswith('.txt')), None)
-                if txt_file is None:
-                    # print("No txt file found in the zip")
-                    return 'No txt file found in the zip', 400
-                with z.open(txt_file) as f:
-                    content = preprocess_content(decode_file(f))
-        else:
-            # print("Processing regular txt file")
-            file.seek(0)  # Reset pointer to the beginning of the file
-            _content = file.read().decode('utf-8', errors='replace').splitlines()
-            content = preprocess_content(_content)
 
         # Define a regex pattern to extract participant names from each message
         name_pattern = re.compile(r"\d{1,2}/\d{1,2}/\d{2,4}, \d{1,2}:\d{1,2}\s[APMapm]{2} - (.*?):")
@@ -2380,10 +1858,6 @@ def most_active_users(num_users):
     except Exception as e:
         logging.exception("An unexpected error occurred.")
         return jsonify({'status': 'error', 'message': str(e)}), 500
-    else:
-        # If no other return has been reached, provide a default response
-        logging.debug("No processing occurred, returning default response")
-        return jsonify({'status': 'error', 'message': 'No processing occurred'}), 500
 
 
 if __name__ == '__main__':
