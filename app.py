@@ -120,6 +120,7 @@ remove_words = [
     "Arquivo oculto", "Arquivo", "oculto", "vídeo omitido", "imagem ocultada", "ocultada", "imagem", "ocultado áudio",
     "ocultado", "áudio", "ocultado audio", "omitida", "figurinha", "video", "omitido", "anexado", "sticker", "image", 
     "imagem", "vídeo", "foto", "edited", "igshid", "open spotify", "open", "spotify", "gmail", "foto", "youtube", "instagram"
+    "‪+5", "+55", "mensagens", "chamadas", "protegidas", "criptografia", "somente participantes desta conversa"
 ]
 
 def preprocess(text):
@@ -426,6 +427,17 @@ def construct_prompt_for_peak_response_time_analysis(avg_hourly_messages, domina
 
     return prompt
 
+def extract_active_days_data(content):
+    date_pattern = re.compile(r"(\d{1,2}/\d{1,2}/\d{2,4}), \d{1,2}:\d{1,2}\s[APMapm]{2} - .*?:")
+    dates = [date_pattern.search(line).group(1) if date_pattern.search(line) else None for line in content]
+    dates = [date for date in dates if date is not None]
+
+    days_of_week = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
+    days = [days_of_week[pd.to_datetime(date).dayofweek] for date in dates]
+    day_counts = Counter(days)
+
+    return day_counts
+
 def extract_conversational_turns_data(content):
     sender_pattern = re.compile(r"\d{1,2}/\d{1,2}/\d{2,4}, \d{1,2}:\d{1,2}\s[APMapm]{2} - (.*?):")
     senders = [sender_pattern.search(line).group(1) if sender_pattern.search(line) else None for line in content]
@@ -634,6 +646,29 @@ def construct_shorter_prompt_from_data_avg_sentiments(avg_sentiments, type):
     
     return prompt
 
+def construct_prompt_for_user_message_count_analysis(message_counts, analysis_type):
+    """
+    Constructs a prompt based on user message count data.
+    """
+    # Preparing the introduction of the analysis
+    summary = "An analysis of message frequency in a WhatsApp group chat highlights how active different users are. Here's an insight into the messaging patterns:\n"
+
+    # Sorting and picking top contributors for the summary
+    sorted_message_counts = sorted(message_counts.items(), key=lambda x: x[1], reverse=True)[:10]  # Example: Top 10 users
+    for user, count in sorted_message_counts:
+        summary += f"- {user}: {count} messages.\n"
+
+    # Tailoring the prompt based on the analysis type
+    if analysis_type == 'technical':
+        prompt = summary + "What do these message counts suggest about user engagement, group dynamics, or individual roles within the chat?"
+    elif analysis_type == 'fun':
+        prompt = summary + "Let's interpret these numbers in a fun way. What could these message counts humorously suggest about the personalities or behaviors of these users?"
+    elif analysis_type == 'zoeira':
+        prompt = summary + "How about a playful or sarcastic take on these figures? Let's see a humorous analysis that reflects the unique character of the group. Remember, 'The zueira never ends!'"
+    prompt += " Em português, por favor."
+
+    return prompt
+
 
 def construct_prompt_from_data_avg_sentiments(avg_sentiments, type):
     """
@@ -698,6 +733,232 @@ def construct_prompt_for_conversational_turns_analysis(turn_counts, analysis_typ
         prompt = summary + "Let's make this fun. Can you provide a creative interpretation of these conversational dynamics?"
     elif analysis_type == 'zoeira':
         prompt = summary + "Provide a humorous or sarcastic take on these conversational patterns. Remember, 'The zueira never ends!'"
+    prompt += " Em português, por favor."
+
+    return prompt
+
+def construct_prompt_for_active_days_analysis(day_counts, analysis_type):
+    """
+    Constructs a prompt based on active days data.
+    """
+    summary = "The data shows the frequency of messages sent on each day of the week in a WhatsApp group chat. Here are the key insights:\n"
+
+    days_of_week = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
+    
+    # Summarizing the message frequency for each day of the week
+    for day in days_of_week:
+        count = day_counts.get(day, 0)
+        summary += f"- On {day}, the number of messages was {count}.\n"
+
+    # Tailoring the prompt based on the analysis type
+    if analysis_type == 'technical':
+        prompt = summary + "Please provide a technical analysis of the chat group's activity pattern based on these daily frequencies."
+    elif analysis_type == 'fun':
+        prompt = summary + "Let's make this fun. Can you provide a creative and humorous interpretation of the group's activity pattern?"
+    elif analysis_type == 'zoeira':
+        prompt = summary + "Provide a playful or sarcastic take on these activity patterns. Remember, 'The zueira never ends!'"
+    prompt += " Em português, por favor."
+
+    return prompt
+
+def construct_prompt_for_wordcloud_analysis(text, analysis_type):
+    """
+    Constructs a prompt based on word cloud data.
+    """
+    summary = "The word cloud generated from a WhatsApp group chat's messages highlights the following prominent words: " + text + ".\n"
+
+    # Tailoring the prompt based on the analysis type
+    if analysis_type == 'technical':
+        prompt = summary + "Please provide a technical analysis of what these prominent words might suggest about the group's main topics of discussion, interests, or behavior patterns."
+    elif analysis_type == 'fun':
+        prompt = summary + "Let's approach this creatively. Can you give an entertaining interpretation of what these words reveal about the group's character or dynamics?"
+    elif analysis_type == 'zoeira':
+        prompt = summary + "How about a humorous or sarcastic take on these words? What amusing insights can you offer? Remember, 'The zueira never ends!'"
+    prompt += " Em português, por favor."
+
+    return prompt
+
+def construct_prompt_for_lengthiest_messages_analysis(sorted_average_lengths, analysis_type):
+    """
+    Constructs a prompt based on the analysis of the lengthiest messages by top contributors.
+    """
+    summary = "An analysis of a WhatsApp group chat has revealed interesting insights into the length of messages by top contributors. The following participants have the longest average message lengths:\n"
+
+    # Highlighting top contributors and their average message lengths
+    for name, avg_length in sorted_average_lengths:
+        summary += f"- {name}: Average message length of {avg_length:.2f} characters.\n"
+
+    # Tailoring the prompt based on the analysis type
+    if analysis_type == 'technical':
+        prompt = summary + "What might these findings suggest about the communication styles, engagement levels, or roles of these contributors in the group?"
+    elif analysis_type == 'fun':
+        prompt = summary + "Can you provide a creative and entertaining interpretation of these results? What might the message lengths reveal about the personalities or behavior of these contributors?"
+    elif analysis_type == 'zoeira':
+        prompt = summary + "Let's add a touch of humor. How could these message lengths be humorously interpreted to reflect the contributors' roles or quirks in the group? Remember, 'The zueira never ends!'"
+    prompt += " Em português, por favor."
+
+    return prompt
+
+
+def construct_prompt_for_sentiment_distribution_analysis(sentiments, analysis_type):
+    """
+    Constructs a prompt based on sentiment distribution data, ensuring percentages are correctly calculated.
+    """
+    # Calculate total messages to derive percentages
+    total_messages = sum(sentiments.values())
+    if total_messages > 0:
+        positive_percentage = (sentiments['positive'] / total_messages) * 100
+        neutral_percentage = (sentiments['neutral'] / total_messages) * 100
+        negative_percentage = (sentiments['negative'] / total_messages) * 100
+    else:
+        positive_percentage = neutral_percentage = negative_percentage = 0
+
+    summary = "The sentiment analysis of a WhatsApp group chat reveals the following distribution: "
+    summary += f"{positive_percentage:.1f}% positive, {neutral_percentage:.1f}% neutral, and {negative_percentage:.1f}% negative messages.\n"
+
+    # Tailoring the prompt based on the analysis type
+    if analysis_type == 'technical':
+        prompt = summary + "What might these sentiment proportions suggest about the overall mood, topics of discussion, or the nature of interactions within the group?"
+    elif analysis_type == 'fun':
+        prompt = summary + "Can you provide a creative and entertaining interpretation of these sentiments? What could they humorously reveal about the group's dynamics?"
+    elif analysis_type == 'zoeira':
+        prompt = summary + "Let’s see a lighthearted, perhaps sarcastic, analysis of these sentiments. How might they amusingly reflect the group's character or interactions? Remember, 'The zueira never ends!'"
+    prompt += " Em português, por favor."
+
+    return prompt
+
+
+
+def extract_topic_data(content, politics_keywords, religion_keywords, soccer_keywords, sex_pornography_keywords, alcohol_keywords):
+    message_pattern = re.compile(r"\d{1,2}/\d{1,2}/\d{2,4}, \d{1,2}:\d{1,2}\s[APMapm]{2} - .*?: (.*)")
+    messages = [message_pattern.search(line).group(1) if message_pattern.search(line) else None for line in content]
+    messages = [msg for msg in messages if msg is not None]
+
+    topic_counts = {
+        'politics': sum(1 for msg in messages if any(keyword in msg for keyword in politics_keywords)),
+        'religion': sum(1 for msg in messages if any(keyword in msg for keyword in religion_keywords)),
+        'soccer': sum(1 for msg in messages if any(keyword in msg for keyword in soccer_keywords)),
+        'sex & pornography': sum(1 for msg in messages if any(keyword in msg for keyword in sex_pornography_keywords)),
+        'alcohol': sum(1 for msg in messages if any(keyword in msg for keyword in alcohol_keywords) or is_drinking_invitation(msg))
+    }
+
+    total_messages = len(messages)
+    topic_percentages = {topic: (count/total_messages)*100 for topic, count in topic_counts.items()}
+
+    return topic_percentages
+
+def extract_word_frequency_data(content, preprocess, top_words):
+    message_pattern = re.compile(r"\d{1,2}/\d{1,2}/\d{2,4}, \d{1,2}:\d{1,2}\s[APMapm]{2} - .*?: (.*)")
+    messages = [message_pattern.search(line).group(1) if message_pattern.search(line) else None for line in content]
+    messages = [message for message in messages if message is not None]
+
+    preprocessed_messages = [' '.join(preprocess(message)) for message in messages]
+
+    word_freq = Counter()
+    for message in preprocessed_messages:
+        tokens = message.split()
+        word_freq.update(tokens)
+
+    return word_freq.most_common(top_words)
+
+def extract_wordcloud_data(content, preprocess):
+    message_pattern = re.compile(r"\d{1,2}/\d{1,2}/\d{2,4}, \d{1,2}:\d{1,2}\s[APMapm]{2} - .*?: (.*)")
+    messages = [message_pattern.search(line).group(1) if message_pattern.search(line) else None for line in content]
+    messages = [message for message in messages if message is not None]
+
+    preprocessed_messages = [' '.join(preprocess(message)) for message in messages]
+    text = ' '.join(preprocessed_messages)
+
+    return text
+
+def extract_lengthiest_message_data(content, top_contributors):
+    message_pattern = re.compile(r"\d{1,2}/\d{1,2}/\d{2,4}, \d{1,2}:\d{1,2}\s[APMapm]{2} - (.*?): (.*)")
+    total_message_lengths = defaultdict(int)
+    message_counts_by_user = defaultdict(int)
+
+    for line in content:
+        match = message_pattern.search(line)
+        if match:
+            name, message = match.groups()
+            total_message_lengths[name] += len(message)
+            message_counts_by_user[name] += 1
+
+    average_message_lengths = {name: total_message_lengths[name] / message_counts_by_user[name] for name in total_message_lengths}
+    sorted_average_lengths = sorted(average_message_lengths.items(), key=lambda x: x[1], reverse=True)[:top_contributors]
+
+    return sorted_average_lengths
+
+def extract_sentiment_data(content):
+    message_pattern = re.compile(r"\d{1,2}/\d{1,2}/\d{2,4}, \d{1,2}:\d{1,2}\s[APMapm]{2} - .*?: (.*)")
+    messages = [message_pattern.search(line).group(1) if message_pattern.search(line) else None for line in content]
+    messages = [message for message in messages if message is not None]
+
+    analyzer = SentimentIntensityAnalyzer()
+    sentiments = {"positive": 0, "neutral": 0, "negative": 0}
+
+    for message in messages:
+        vs = analyzer.polarity_scores(message)
+        if vs['compound'] >= 0.05:
+            sentiments['positive'] += 1
+        elif vs['compound'] <= -0.05:
+            sentiments['negative'] += 1
+        else:
+            sentiments['neutral'] += 1
+
+    return sentiments
+
+
+def extract_user_message_counts(content):
+    name_pattern = re.compile(r"\d{1,2}/\d{1,2}/\d{2,4}, \d{1,2}:\d{1,2}\s[APMapm]{2} - (.*?):")
+    message_counts = defaultdict(int)
+
+    for line in content:
+        match = name_pattern.search(line)
+        if match:
+            name = match.group(1)
+            message_counts[name] += 1
+
+    return message_counts
+
+def construct_prompt_for_topic_percentage_analysis(topic_percentages, analysis_type):
+    """
+    Constructs a prompt based on topic percentage data.
+    """
+    summary = "The data analysis reveals the percentage distribution of messages across various topics in a WhatsApp group chat. Here's a breakdown:\n"
+
+    # Iterate over each topic and its percentage
+    for topic, percentage in topic_percentages.items():
+        summary += f"- {topic.title()}: {percentage:.2f}% of messages.\n"
+
+    # Tailoring the prompt based on the analysis type
+    if analysis_type == 'technical':
+        prompt = summary + "Please provide a technical analysis of what these topic distributions might suggest about the group's interests and dynamics."
+    elif analysis_type == 'fun':
+        prompt = summary + "Let's have some fun with this data. Can you provide a creative and humorous interpretation of what these topics say about the group?"
+    elif analysis_type == 'zoeira':
+        prompt = summary + "Time for a playful take. Give a sarcastic or witty commentary on these topics. Remember, 'The zueira never ends!'"
+    prompt += " Em português, por favor."
+
+    return prompt
+
+def construct_prompt_for_word_frequency_analysis(top_words_data, analysis_type):
+    """
+    Constructs a prompt based on word frequency data, focusing on the implications of word usage frequency.
+    """
+    # Create an introductory summary
+    summary = "An analysis of a WhatsApp group chat has revealed interesting patterns in word usage. The most frequently used words have varying frequencies, indicating diverse topics and engagement levels.\n"
+
+    # Highlight the frequency aspect
+    total_mentions = sum(count for _, count in top_words_data)
+    summary += f"Altogether, the top words account for {total_mentions} mentions in the conversation.\n"
+
+    # Tailoring the prompt based on the analysis type
+    if analysis_type == 'technical':
+        prompt = summary + "What might these frequency patterns suggest about the group's communication style, prevalent topics, or the nature of their interactions?"
+    elif analysis_type == 'fun':
+        prompt = summary + "Can you provide an imaginative interpretation of these frequency patterns? What humorous or surprising insights might they reveal about the group's dynamics?"
+    elif analysis_type == 'zoeira':
+        prompt = summary + "Let's add a twist of humor. How could these word frequencies be playfully interpreted to uncover the group's quirks or idiosyncrasies? 'The zueira never ends!' applies here."
     prompt += " Em português, por favor."
 
     return prompt
@@ -1318,8 +1579,8 @@ def analyse_activity_heatmap():
         # Call ChatGPT API
         chatgpt_response = call_chatgpt_api(prompt, "gpt-3.5-turbo", length, temperature)
 
-        # Returning the response
-        return jsonify({'response': chatgpt_response})
+        # Returning the ChatGPT API response
+        return jsonify(chatgpt_response)
 
     except Exception as e:
         logging.exception("An unexpected error occurred.")
@@ -1535,18 +1796,10 @@ def plot_active_days():
         return jsonify({'status': 'error', 'message': error_message}), error_code
 
     try:
+        day_counts = extract_active_days_data(content)
 
-        # Define a regex pattern to extract the date of each message
-        date_pattern = re.compile(r"(\d{1,2}/\d{1,2}/\d{2,4}), \d{1,2}:\d{1,2}\s[APMapm]{2} - .*?:")
-        dates = [date_pattern.search(line).group(1) if date_pattern.search(line) else None for line in content]
-        dates = [date for date in dates if date is not None]
-
-        # Convert the dates to days of the week
+        # Define the days of the week for plotting
         days_of_week = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
-        days = [days_of_week[pd.to_datetime(date).dayofweek] for date in dates]
-
-        # Count the messages for each day of the week
-        day_counts = Counter(days)
 
         # Prepare data for plotting
         day_labels = days_of_week
@@ -1571,6 +1824,35 @@ def plot_active_days():
         logging.exception("An unexpected error occurred.")
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
+
+@app.route('/whatsapp/message/active_days/analyse', methods=['POST'])
+def analyse_active_days():
+    content, error_message, error_code = process_file(request)
+    if content is None:
+        return jsonify({'status': 'error', 'message': error_message}), error_code
+
+    try:
+        data = json.loads(request.form.get('data', '{}'))
+        analysis_type = data.get('type', 'technical')
+        temperature = data.get('temperature', 0)
+
+        day_counts = extract_active_days_data(content)
+
+        if not day_counts:
+            return jsonify({'status': 'error', 'message': "No data available for analysis"}), 400
+
+        prompt = construct_prompt_for_active_days_analysis(day_counts, analysis_type)
+
+        length = 350 if analysis_type == 'technical' else 400 if analysis_type == 'fun' else 500 if analysis_type == 'zoeira' else 300
+        chatgpt_response = call_chatgpt_api(prompt, "gpt-3.5-turbo", length, temperature)
+
+        return jsonify(chatgpt_response)
+
+    except Exception as e:
+        logging.exception("An unexpected error occurred.")
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+
 @app.route('/whatsapp/message/topic_percentage', methods=['POST'])
 def topic_percentage():
     content, error_message, error_code = process_file(request)
@@ -1579,23 +1861,7 @@ def topic_percentage():
 
     try:
         
-        # Extract messages from the content
-        message_pattern = re.compile(r"\d{1,2}/\d{1,2}/\d{2,4}, \d{1,2}:\d{1,2}\s[APMapm]{2} - .*?: (.*)")
-        messages = [message_pattern.search(line).group(1) if message_pattern.search(line) else None for line in content]
-        messages = [msg for msg in messages if msg is not None]
-
-        # Check messages for presence of keywords
-        topic_counts = {
-            'politics': sum(1 for msg in messages if any(keyword in msg for keyword in politics_keywords)),
-            'religion': sum(1 for msg in messages if any(keyword in msg for keyword in religion_keywords)),
-            'soccer': sum(1 for msg in messages if any(keyword in msg for keyword in soccer_keywords)),
-            'sex & pornography': sum(1 for msg in messages if any(keyword in msg for keyword in sex_pornography_keywords)),
-            'alcohol': sum(1 for msg in messages if any(keyword in msg for keyword in alcohol_keywords) or is_drinking_invitation(msg))
-        }
-
-        # Convert message counts to percentages
-        total_messages = len(messages)
-        topic_percentages = {topic: (count/total_messages)*100 for topic, count in topic_counts.items()}
+        topic_percentages = extract_topic_data(content, politics_keywords, religion_keywords, soccer_keywords, sex_pornography_keywords, alcohol_keywords)
 
         # Plotting
         plt.figure(figsize=(12, 7))
@@ -1614,6 +1880,35 @@ def topic_percentage():
     except Exception as e:
         logging.exception("An unexpected error occurred.")
         return jsonify({'status': 'error', 'message': str(e)}), 500
+
+
+@app.route('/whatsapp/message/topic_percentage/analyse', methods=['POST'])
+def analyse_topic_percentage():
+    content, error_message, error_code = process_file(request)
+    if content is None:
+        return jsonify({'status': 'error', 'message': error_message}), error_code
+
+    try:
+        data = json.loads(request.form.get('data', '{}'))
+        analysis_type = data.get('type', 'technical')
+        temperature = data.get('temperature', 0)
+
+        topic_percentages = extract_topic_data(content, politics_keywords, religion_keywords, soccer_keywords, sex_pornography_keywords, alcohol_keywords)
+
+        if not topic_percentages:
+            return jsonify({'status': 'error', 'message': "No data available for analysis"}), 400
+
+        prompt = construct_prompt_for_topic_percentage_analysis(topic_percentages, analysis_type)
+
+        length = 350 if analysis_type == 'technical' else 400 if analysis_type == 'fun' else 500 if analysis_type == 'zoeira' else 300
+        chatgpt_response = call_chatgpt_api(prompt, "gpt-3.5-turbo", length, temperature)
+
+        return jsonify(chatgpt_response)
+
+    except Exception as e:
+        logging.exception("An unexpected error occurred.")
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
 
 
 @app.route('/whatsapp/message/topic_percentage/json', methods=['POST'])
@@ -1668,22 +1963,7 @@ def plot_word_frequency(top_words=20):
 
     try:
 
-        # Define a regex pattern to extract the content of each message
-        message_pattern = re.compile(r"\d{1,2}/\d{1,2}/\d{2,4}, \d{1,2}:\d{1,2}\s[APMapm]{2} - .*?: (.*)")
-        messages = [message_pattern.search(line).group(1) if message_pattern.search(line) else None for line in content]
-        messages = [message for message in messages if message is not None]
-
-        # stop_words = _stop_words.union(portuguese_stop_words)
-        preprocessed_messages = [' '.join(preprocess(message)) for message in messages]
-
-        # Tokenize the messages and count the frequency of each word
-        word_freq = Counter()
-        for message in preprocessed_messages:
-            tokens = message.split()
-            word_freq.update(tokens)
-
-        # Extract the top N words for plotting
-        top_words_data = word_freq.most_common(top_words)
+        top_words_data = extract_word_frequency_data(content, preprocess, top_words)
         words, counts = zip(*top_words_data)
 
         # Plotting the data
@@ -1707,30 +1987,48 @@ def plot_word_frequency(top_words=20):
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
 
-@app.route('/whatsapp/message/wordcloud', methods=['POST'])
-def plot_cleaned_wordcloud():
-
+@app.route('/whatsapp/message/wordfrequency/<int:top_words>/analyse', methods=['POST'])
+def analyse_word_frequency(top_words=20):
     content, error_message, error_code = process_file(request)
     if content is None:
         return jsonify({'status': 'error', 'message': error_message}), error_code
 
     try:
+        data = json.loads(request.form.get('data', '{}'))
+        analysis_type = data.get('type', 'technical')
+        temperature = data.get('temperature', 0)
 
-        # Regular expression to extract the message content
-        message_pattern = re.compile(r"\d{1,2}/\d{1,2}/\d{2,4}, \d{1,2}:\d{1,2}\s[APMapm]{2} - .*?: (.*)")
+        top_words_data = extract_word_frequency_data(content, preprocess, top_words)
+
+        if not top_words_data:
+            return jsonify({'status': 'error', 'message': "No data available for analysis"}), 400
+
+        prompt = construct_prompt_for_word_frequency_analysis(top_words_data, analysis_type)
+
+        # print(prompt)
+
+        length = 350 if analysis_type == 'technical' else 400 if analysis_type == 'fun' else 500 if analysis_type == 'zoeira' else 300
+        chatgpt_response = call_chatgpt_api(prompt, "gpt-3.5-turbo", length, temperature)
+
+        return jsonify(chatgpt_response)
+
+    except Exception as e:
+        logging.exception("An unexpected error occurred.")
+        return jsonify({'status': 'error', 'message': str(e)}), 500
 
 
-        # Extract message content
-        messages = [message_pattern.search(line).group(1) if message_pattern.search(line) else None for line in content]
-        messages = [message for message in messages if message is not None]
+@app.route('/whatsapp/message/wordcloud', methods=['POST'])
+def plot_cleaned_wordcloud():
+    content, error_message, error_code = process_file(request)
+    if content is None:
+        return jsonify({'status': 'error', 'message': error_message}), error_code
 
-        preprocessed_messages = [' '.join(preprocess(message)) for message in messages]
+    try:
+        # Extract and preprocess the text for the word cloud
+        text = extract_wordcloud_data(content, preprocess)
 
-        # # Concatenate all messages
-        text = ' '.join(preprocessed_messages)
-
-        # Generate the word cloud
-        wordcloud = WordCloud(background_color='white', width=800, height=400, max_words=200).generate(' '.join(preprocessed_messages))
+        # Generate the word cloud using the combined preprocessed text
+        wordcloud = WordCloud(background_color='white', width=800, height=400, max_words=200).generate(text)
 
         # Check if the word cloud is effectively empty
         if not wordcloud.words_:
@@ -1747,7 +2045,7 @@ def plot_cleaned_wordcloud():
 
         temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".png")
         plt.savefig(temp_file.name, format='png')
-        plt.close()  # Close the plot
+        plt.close()
 
         # Return the saved image file as the response
         return send_file(temp_file.name, mimetype='image/png')
@@ -1755,6 +2053,37 @@ def plot_cleaned_wordcloud():
     except Exception as e:
         logging.exception("An unexpected error occurred.")
         return jsonify({'status': 'error', 'message': str(e)}), 500
+
+
+@app.route('/whatsapp/message/wordcloud/analyse', methods=['POST'])
+def analyse_wordcloud():
+    content, error_message, error_code = process_file(request)
+    if content is None:
+        return jsonify({'status': 'error', 'message': error_message}), error_code
+
+    try:
+        data = json.loads(request.form.get('data', '{}'))
+        analysis_type = data.get('type', 'technical')
+        temperature = data.get('temperature', 0)
+
+        text = extract_wordcloud_data(content, preprocess)
+
+        if not text.strip():
+            return jsonify({'status': 'error', 'message': "No data available for analysis"}), 400
+
+        prompt = construct_prompt_for_wordcloud_analysis(text, analysis_type)
+
+        # print(prompt)
+
+        length = 350 if analysis_type == 'technical' else 400 if analysis_type == 'fun' else 500 if analysis_type == 'zoeira' else 300
+        chatgpt_response = call_chatgpt_api(prompt, "gpt-3.5-turbo", length, temperature)
+
+        return jsonify(chatgpt_response)
+
+    except Exception as e:
+        logging.exception("An unexpected error occurred.")
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
 
 @app.route('/whatsapp/message/lenghiest/top/<int:top_contributors>', methods=['POST'])
 def plot_lengthiest_messages_pie_chart(top_contributors):
@@ -1764,26 +2093,7 @@ def plot_lengthiest_messages_pie_chart(top_contributors):
 
     try:
 
-        # Define a regex pattern to extract participant names and their messages
-        message_pattern = re.compile(r"\d{1,2}/\d{1,2}/\d{2,4}, \d{1,2}:\d{1,2}\s[APMapm]{2} - (.*?): (.*)")
-
-        # Initialize dictionaries to track total message length and message count for each participant
-        total_message_lengths = defaultdict(int)
-        message_counts_by_user = defaultdict(int)
-
-        # Iterate over each line to extract participant names and their messages, then update the dictionaries
-        for line in content:
-            match = message_pattern.search(line)
-            if match:
-                name, message = match.groups()
-                total_message_lengths[name] += len(message)
-                message_counts_by_user[name] += 1
-
-        # Compute the average message length for each participant
-        average_message_lengths = {name: total_message_lengths[name] / message_counts_by_user[name] for name in total_message_lengths}
-
-        # Sort the participants based on average message length and consider only the top `top_contributors`
-        sorted_average_lengths = sorted(average_message_lengths.items(), key=lambda x: x[1], reverse=True)[:top_contributors]
+        sorted_average_lengths = extract_lengthiest_message_data(content, top_contributors)
 
         # Extract names and average lengths for plotting
         top_names = [item[0] for item in sorted_average_lengths]
@@ -1807,6 +2117,35 @@ def plot_lengthiest_messages_pie_chart(top_contributors):
         logging.exception("An unexpected error occurred.")
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
+@app.route('/whatsapp/message/lenghiest/top/<int:top_contributors>/analyse', methods=['POST'])
+def analyse_lengthiest_messages(top_contributors):
+    content, error_message, error_code = process_file(request)
+    if content is None:
+        return jsonify({'status': 'error', 'message': error_message}), error_code
+
+    try:
+        data = json.loads(request.form.get('data', '{}'))
+        analysis_type = data.get('type', 'technical')
+        temperature = data.get('temperature', 0)
+
+        sorted_average_lengths = extract_lengthiest_message_data(content, top_contributors)
+
+        if not sorted_average_lengths:
+            return jsonify({'status': 'error', 'message': "No data available for analysis"}), 400
+
+        prompt = construct_prompt_for_lengthiest_messages_analysis(sorted_average_lengths, analysis_type)
+
+        # print(prompt)
+
+        length = 350 if analysis_type == 'technical' else 400 if analysis_type == 'fun' else 500 if analysis_type == 'zoeira' else 300
+        chatgpt_response = call_chatgpt_api(prompt, "gpt-3.5-turbo", length, temperature)
+
+        return jsonify(chatgpt_response)
+
+    except Exception as e:
+        logging.exception("An unexpected error occurred.")
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
 
 @app.route('/whatsapp/message/sentiment/distribution', methods=['POST'])
 def plot_sentiment_distribution():
@@ -1816,24 +2155,7 @@ def plot_sentiment_distribution():
 
     try:
 
-        # Define a regex pattern to extract the content of each message
-        message_pattern = re.compile(r"\d{1,2}/\d{1,2}/\d{2,4}, \d{1,2}:\d{1,2}\s[APMapm]{2} - .*?: (.*)")
-        messages = [message_pattern.search(line).group(1) if message_pattern.search(line) else None for line in content]
-        messages = [message for message in messages if message is not None]
-
-        # Initialize the VADER sentiment analyzer
-        analyzer = SentimentIntensityAnalyzer()
-
-        # Categorize each message's sentiment
-        sentiments = {"positive": 0, "neutral": 0, "negative": 0}
-        for message in messages:
-            vs = analyzer.polarity_scores(message)
-            if vs['compound'] >= 0.05:
-                sentiments['positive'] += 1
-            elif vs['compound'] <= -0.05:
-                sentiments['negative'] += 1
-            else:
-                sentiments['neutral'] += 1
+        sentiments = extract_sentiment_data(content)
 
         # Create a pie chart to display the sentiment distribution
         plt.figure(figsize=(12, 8))
@@ -1850,6 +2172,35 @@ def plot_sentiment_distribution():
 
         # Send the saved image file as the response
         return send_file(temp_file.name, mimetype='image/png')
+
+    except Exception as e:
+        logging.exception("An unexpected error occurred.")
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+@app.route('/whatsapp/message/sentiment/distribution/analyse', methods=['POST'])
+def analyse_sentiment_distribution():
+    content, error_message, error_code = process_file(request)
+    if content is None:
+        return jsonify({'status': 'error', 'message': error_message}), error_code
+
+    try:
+        data = json.loads(request.form.get('data', '{}'))
+        analysis_type = data.get('type', 'technical')
+        temperature = data.get('temperature', 0)
+
+        sentiments = extract_sentiment_data(content)
+
+        if not sentiments:
+            return jsonify({'status': 'error', 'message': "No data available for analysis"}), 400
+
+        prompt = construct_prompt_for_sentiment_distribution_analysis(sentiments, analysis_type)
+
+        # print(prompt)
+
+        length = 350 if analysis_type == 'technical' else 400 if analysis_type == 'fun' else 500 if analysis_type == 'zoeira' else 300
+        chatgpt_response = call_chatgpt_api(prompt, "gpt-3.5-turbo", length, temperature)
+
+        return jsonify(chatgpt_response)
 
     except Exception as e:
         logging.exception("An unexpected error occurred.")
@@ -1930,15 +2281,7 @@ def user_message_count():
 
     try:
 
-        # Regular expression to extract the name pattern from a typical line
-        name_pattern = re.compile(r"\d{1,2}/\d{1,2}/\d{2,4}, \d{1,2}:\d{1,2}\s[APMapm]{2} - (.*?):")
-
-        # Extract names and count the messages
-        for line in content:
-            match = name_pattern.search(line)
-            if match:
-                name = match.group(1)
-                message_counts[name] += 1
+        message_counts = extract_user_message_counts(content)
 
         # Sort the dictionary by message count
         sorted_message_counts = sorted(message_counts.items(), key=lambda item: item[1])
@@ -1969,6 +2312,34 @@ def user_message_count():
 
         # Send the saved image file as the response
         return send_file(temp_file.name, mimetype='image/png')
+
+    except Exception as e:
+        logging.exception("An unexpected error occurred.")
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+
+@app.route('/whatsapp/message/usercount/analyse', methods=['POST'])
+def analyse_user_message_count():
+    content, error_message, error_code = process_file(request)
+    if content is None:
+        return jsonify({'status': 'error', 'message': error_message}), error_code
+
+    try:
+        data = json.loads(request.form.get('data', '{}'))
+        analysis_type = data.get('type', 'technical')
+        temperature = data.get('temperature', 0)
+
+        message_counts = extract_user_message_counts(content)
+
+        if not message_counts:
+            return jsonify({'status': 'error', 'message': "No data available for analysis"}), 400
+
+        prompt = construct_prompt_for_user_message_count_analysis(message_counts, analysis_type)
+
+        length = 350 if analysis_type == 'technical' else 400 if analysis_type == 'fun' else 500 if analysis_type == 'zoeira' else 300
+        chatgpt_response = call_chatgpt_api(prompt, "gpt-3.5-turbo", length, temperature)
+
+        return jsonify(chatgpt_response)
 
     except Exception as e:
         logging.exception("An unexpected error occurred.")
