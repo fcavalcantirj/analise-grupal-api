@@ -397,6 +397,78 @@ def process_file(request):
         logging.exception("Error processing file")
         return None, str(e), 500
 
+def construct_prompt_for_peak_response_time_analysis(avg_hourly_messages, dominant_sender, analysis_type):
+    """
+    Constructs a prompt based on peak response time data.
+    """
+    summary = "The data shows the average number of messages sent per hour in a WhatsApp group chat, along with the most active sender during each hour. Here are the key insights:\n"
+
+    # Tailoring the summary based on the amount of data (hours)
+    num_hours = len(avg_hourly_messages)
+    if num_hours > 24:  # Assuming a threshold of 24 hours for more detailed analysis
+        # For larger datasets, focus on peak hours or significant patterns
+        peak_hours = avg_hourly_messages.nlargest(3)  # Example: Top 3 hours with most messages
+        summary += "Peak hours are as follows:\n"
+        for hour, count in peak_hours.iteritems():
+            summary += f"- At {hour}:00, the average message count is {count}, with {dominant_sender[hour]} being the most active sender.\n"
+    else:
+        # For smaller datasets, provide an hour-by-hour summary
+        for hour, count in avg_hourly_messages.items():
+            summary += f"- At {hour}:00, the average message count is {count}, with {dominant_sender[hour]} being the most active sender.\n"
+
+    # Tailor the prompt based on the analysis type
+    if analysis_type == 'technical':
+        prompt = summary + "Please provide a technical analysis of what these patterns might suggest about group interaction dynamics."
+    elif analysis_type == 'fun':
+        prompt = summary + "Let's make this fun. Provide a creative and humorous interpretation of these hourly patterns."
+    elif analysis_type == 'zoeira':
+        prompt = summary + "Provide a lighthearted, perhaps even sarcastic analysis. Remember, 'The zueira never ends!'"
+    prompt += " Em português, por favor."
+
+    return prompt
+
+
+def extract_peak_response_time_data(content):
+    timestamp_pattern = re.compile(r"(\d{1,2}/\d{1,2}/\d{2,4}, \d{1,2}:\d{1,2}(?:\s?[APMapm]{2})?) - (.*?):")
+    timestamps = []
+    senders = []
+
+    for line in content:
+        match = timestamp_pattern.search(line)
+        if match:
+            timestamp_str, sender = match.groups()
+            # Correcting the time format
+            timestamp_str = correct_time_format(timestamp_str)
+            try:
+                timestamp_format = "%d/%m/%y, %I:%M %p" if "AM" in timestamp_str or "PM" in timestamp_str else "%d/%m/%y, %H:%M"
+                timestamp = datetime.strptime(timestamp_str, timestamp_format)
+            except ValueError:
+                # Fallback to month/day/year format
+                timestamp_format = "%m/%d/%y, %H:%M"
+                timestamp = datetime.strptime(timestamp_str, timestamp_format)
+            timestamps.append(timestamp)
+            senders.append(sender)
+
+    df = pd.DataFrame({'Timestamp': timestamps, 'Sender': senders})
+    df['Hour'] = df['Timestamp'].dt.hour
+    avg_hourly_messages = df.groupby('Hour').size()
+    dominant_sender = df.groupby('Hour')['Sender'].agg(lambda x: x.value_counts().idxmax())
+
+    return avg_hourly_messages, dominant_sender
+
+def correct_time_format(timestamp_str):
+    # Function to correct invalid time format
+    time_part = timestamp_str.split(", ")[1].split(" ")[0]
+    hour, minute = map(int, time_part.split(":"))
+    if "AM" in timestamp_str or "PM" in timestamp_str:
+        if hour == 0:
+            timestamp_str = timestamp_str.replace("00:", "12:")
+        if hour < 12 and "PM" in timestamp_str:
+            hour += 12
+            timestamp_str = timestamp_str.replace(time_part, f"{hour}:{minute}")
+        timestamp_str = timestamp_str.replace(" AM", "").replace(" PM", "")
+    return timestamp_str
+
 def extract_and_process_sentiments(content):
     """
     Extracts timestamps and messages from the content and computes sentiment scores.
@@ -1005,94 +1077,62 @@ def analyse_sentiment_over_time():
 
 @app.route('/whatsapp/message/peak_response_time', methods=['POST'])
 def analyze_peak_response_time():
-    content, error_message, error_code = process_file(request)
+    content, error_message, error_code = process_file(request)  # Assuming process_file is already defined
     if content is None:
         return jsonify({'status': 'error', 'message': error_message}), error_code
 
     try:
+        avg_hourly_messages, dominant_sender = extract_peak_response_time_data(content)
 
-        # print(content[:10])  # Print the first 10 lines
-
-        # Update the regex pattern
-        timestamp_pattern = re.compile(r"(\d{1,2}/\d{1,2}/\d{2,4}, \d{1,2}:\d{1,2}(?:\s?[APMapm]{2})?) - (.*?):")
-
-        # Lists to store the extracted timestamps and senders
-        timestamps = []
-        senders = []
-
-        # Function to correct invalid time format
-        def correct_time_format(timestamp_str):
-            time_part = timestamp_str.split(", ")[1].split(" ")[0]
-            hour, minute = map(int, time_part.split(":"))
-            
-            if "AM" in timestamp_str or "PM" in timestamp_str:
-                # Adjust for midnight or noon
-                if hour == 0:
-                    timestamp_str = timestamp_str.replace("00:", "12:")
-                # Remove PM/AM for 24-hour format
-                if hour >= 12:
-                    timestamp_str = timestamp_str.replace(" PM", "")
-                else:
-                    timestamp_str = timestamp_str.replace(" AM", "")
-            return timestamp_str
-
-        # Use the modified function in the previous code
-        for line in content:
-            match = timestamp_pattern.search(line)
-            if match:
-                timestamp_str, sender = match.groups()
-                timestamp_str = correct_time_format(timestamp_str)
-                # Adjust datetime parsing based on whether AM/PM exists in the string
-                if "AM" in timestamp_str or "PM" in timestamp_str:
-                    timestamp_format = "%d/%m/%y, %I:%M %p"
-                else:
-                    timestamp_format = "%d/%m/%y, %H:%M"
-                try:
-                    timestamp = datetime.strptime(timestamp_str, timestamp_format)
-                except ValueError:
-                    timestamp_format = "%m/%d/%y, %H:%M"  # fallback to month/day/year
-                    timestamp = datetime.strptime(timestamp_str, timestamp_format)
-                timestamps.append(timestamp)
-                senders.append(sender)
-
-        # print("timestamps: ", str(len(timestamps)))
-        # print("senders: ", str(len(senders)))
-
-        # Create a DataFrame from the extracted data
-        df = pd.DataFrame({'Timestamp': timestamps, 'Sender': senders})
-
-        # Extract the hour from each timestamp
-        df['Hour'] = df['Timestamp'].dt.hour
-
-        # Calculate the average number of messages sent per hour
-        avg_hourly_messages = df.groupby('Hour').size()
-
-        # Calculate the sender who sent the most messages for each hour
-        dominant_sender = df.groupby('Hour')['Sender'].agg(lambda x: x.value_counts().idxmax())
-
-        # Plotting
+        # Plotting logic
         plt.figure(figsize=(12, 7))
         avg_hourly_messages.plot(kind='bar', color='dodgerblue')
         plt.xlabel('Hour of the Day')
         plt.ylabel('Average Messages')
         plt.title('Average Messages Per Hour and Dominant Sender')
-        
-        # Annotate bars with dominant sender's name
         for idx, value in enumerate(avg_hourly_messages):
             plt.text(idx, value + 0.5, dominant_sender.iloc[idx], ha='center', rotation=90, fontsize=8)
-
-        # Save the plot to a temporary file
         temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".png")
         plt.tight_layout()
         plt.savefig(temp_file.name, format='png')
         plt.close()
-
-        # Send the saved image file as the response
         return send_file(temp_file.name, mimetype='image/png')
 
     except Exception as e:
         logging.exception("An unexpected error occurred.")
         return jsonify({'status': 'error', 'message': str(e)}), 500
+
+@app.route('/whatsapp/message/peak_response_time/analyse', methods=['POST'])
+def analyse_peak_response_time():
+    content, error_message, error_code = process_file(request)
+    if content is None:
+        return jsonify({'status': 'error', 'message': error_message}), error_code
+
+    try:
+        data = json.loads(request.form.get('data', '{}'))
+        analysis_type = data.get('type', 'technical')  # Default to 'technical' if not provided
+        temperature = data.get('temperature', 0)  # Default to 0 if not provided
+
+        avg_hourly_messages, dominant_sender = extract_peak_response_time_data(content)
+
+        if avg_hourly_messages.empty:
+            return jsonify({'status': 'error', 'message': "No data available for analysis"}), 400
+
+        # Construct a prompt for further analysis
+        prompt = construct_prompt_for_peak_response_time_analysis(avg_hourly_messages, dominant_sender, analysis_type)
+
+        print(prompt)
+
+        # Call ChatGPT API
+        chatgpt_response = call_chatgpt_api(prompt, "gpt-3.5-turbo", 300, temperature)
+
+        # Returning the response
+        return jsonify({'response': chatgpt_response})
+
+    except Exception as e:
+        logging.exception("An unexpected error occurred.")
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
 
 @app.route('/whatsapp/message/peak_response_time/json', methods=['POST'])
 def analyze_peak_response_time_json():
