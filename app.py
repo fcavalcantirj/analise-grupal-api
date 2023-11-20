@@ -1124,10 +1124,11 @@ def analyse_peak_response_time():
         print(prompt)
 
         # Call ChatGPT API
-        chatgpt_response = call_chatgpt_api(prompt, "gpt-3.5-turbo", 300, temperature)
+        length = 350 if analysis_type == 'technical' else 400 if analysis_type == 'fun' else 500 if analysis_type == 'zoeira' else 300
+        chatgpt_response = call_chatgpt_api(prompt, "gpt-3.5-turbo", length, temperature)
 
-        # Returning the response
-        return jsonify({'response': chatgpt_response})
+        # Returning the ChatGPT API response
+        return jsonify(chatgpt_response)
 
     except Exception as e:
         logging.exception("An unexpected error occurred.")
