@@ -446,51 +446,56 @@ def extract_and_analyze_sentiment(content):
     return avg_sentiments
 
 
+def identify_significant_changes(monthly_avg):
+    """
+    Identifies significant changes in monthly average sentiment.
+    """
+    changes_summary = ""
+    previous_month_sentiment = None
+
+    for month, row in monthly_avg.iterrows():
+        if previous_month_sentiment is not None:
+            change = row['sentiment'] - previous_month_sentiment
+            if abs(change) > 0.014:  # Assuming a change greater than 0.014 is significant; adjust as needed
+                change_type = "increase" if change > 0 else "decrease"
+                changes_summary += (f"- There was a significant {change_type} in sentiment in {month.strftime('%B %Y')} "
+                                    f"(change: {change:.2f}).\n")
+        previous_month_sentiment = row['sentiment']
+
+    if not changes_summary:
+        changes_summary = "No significant month-to-month changes were detected."
+
+    return changes_summary
+
+
 def construct_prompt_for_sentiment_analysis(df, analysis_type):
     """
-    Constructs a human-like prompt from the sentiment over time data with a monthly summary.
+    Constructs a human-like prompt from the sentiment over time data.
+    Adjusts the level of detail based on the number of months in the dataset.
     """
     # Resample the data to get monthly averages
     monthly_avg = df.resample('M').mean()
 
-    summary = "The data shows how sentiment scores vary over time in a WhatsApp group chat, summarized by month. Here are some key insights:\n"
-    for month, row in monthly_avg.iterrows():
-        sentiment_description = "positive" if row['sentiment'] > 0 else "negative" if row['sentiment'] < 0 else "neutral"
-        summary += f"- For {month.strftime('%B %Y')}, the average sentiment was {sentiment_description}, with a score of {row['sentiment']:.2f}.\n"
+    num_months = len(monthly_avg)
+    summary = "The data shows how sentiment scores vary over time in a WhatsApp group chat, summarized by month. "
+
+    if num_months > 30:
+        # For larger datasets, focus on significant changes or patterns
+        significant_changes = identify_significant_changes(monthly_avg)
+        summary += "Here are some significant changes and patterns:\n" + significant_changes
+    else:
+        # For smaller datasets, provide a month-by-month summary
+        for month, row in monthly_avg.iterrows():
+            sentiment_description = "positive" if row['sentiment'] > 0 else "negative" if row['sentiment'] < 0 else "neutral"
+            summary += f"- For {month.strftime('%B %Y')}, the average sentiment was {sentiment_description}, with a score of {row['sentiment']:.2f}.\n"
 
     # Tailor the prompt based on the analysis type
     if analysis_type == 'technical':
-        prompt = summary + "Please provide a technical explanation of what these monthly trends might suggest about the group dynamics."
+        prompt = summary + "Please provide a technical explanation of what these trends might suggest about the group dynamics."
     elif analysis_type == 'fun':
-        prompt = summary + "Let's make this fun. Provide a creative and lighthearted explanation of what these monthly trends might suggest about the group dynamics."
+        prompt = summary + "Let's make this fun. Provide a creative and lighthearted explanation of these trends."
     elif analysis_type == 'zoeira':
-        prompt = summary + "Please provide a sarcastic and humorous analysis of the monthly data. Be bold and creative. Remember, 'The zueira never ends!'"
-    prompt += " Em português, por favor."
-
-    return prompt
-
-
-def construct_prompt_for_sentiment_analysis_old(df, analysis_type):
-    """
-    Constructs a human-like prompt from the sentiment over time data with a summary.
-    """
-    # Generate a high-level summary from the DataFrame
-    avg_sentiment = df['sentiment'].mean()
-    max_sentiment = df['sentiment'].max()
-    min_sentiment = df['sentiment'].min()
-    sentiment_description = "positive" if avg_sentiment > 0 else "negative" if avg_sentiment < 0 else "neutral"
-
-    summary = (f"The data shows how sentiment scores vary over time in a WhatsApp group chat. "
-               f"The average sentiment is generally {sentiment_description} with a mean score of {avg_sentiment:.2f}. "
-               f"The highest sentiment score recorded was {max_sentiment:.2f}, and the lowest was {min_sentiment:.2f}. ")
-
-    # Tailor the prompt based on the analysis type
-    if analysis_type == 'technical':
-        prompt = summary + "Please provide a technical explanation of what this trend might suggest about the group dynamics."
-    elif analysis_type == 'fun':
-        prompt = summary + "Let's make this fun. Provide a creative and lighthearted explanation of what this trend might suggest about the group dynamics."
-    elif analysis_type == 'zoeira':
-        prompt = summary + "Please provide a sarcastic and humorous analysis of the data. Be bold and creative (but concise). Remember, 'The zueira never ends!'"
+        prompt = summary + "Please provide a sarcastic and humorous analysis of the data. Remember, 'The zueira never ends!'"
     prompt += " Em português, por favor."
 
     return prompt
