@@ -247,7 +247,6 @@ def preprocess_content_new(content, words_to_remove=[]):
 
     for line in content:
         line = line.replace('"', "'")
-        print(line)
         matched = False
         for pattern in patterns:
             match = pattern.search(line)
@@ -365,7 +364,7 @@ def decode_file(file_stream):
         file_stream.seek(0)  # Go back to the beginning of the file again
         return file_stream.read().decode(encoding).splitlines()
     except Exception as e:
-        print(f"An error occurred in decode_file: {e}")
+        logging.error(f"An error occurred in decode_file: {e}")
         raise  # Re-raise the exception to be handled by the calling function
 
 def process_file(request):
@@ -427,6 +426,21 @@ def construct_prompt_for_peak_response_time_analysis(avg_hourly_messages, domina
 
     return prompt
 
+def extract_activity_data(content):
+    date_time_pattern = re.compile(r"(\d{1,2}/\d{1,2}/\d{2,4}), (\d{1,2}:\d{1,2})\s[APMapm]{2}")
+    date_times = [date_time_pattern.search(line).groups() for line in content if date_time_pattern.search(line)]
+    dates, times = zip(*date_times)
+
+    date_times = pd.to_datetime([' '.join(item) for item in zip(dates, times)], errors='coerce')
+    df = pd.DataFrame({'datetime': date_times})
+    df['day_of_week'] = df['datetime'].dt.day_name()
+    df['hour'] = df['datetime'].dt.hour
+
+    heatmap_data = df.pivot_table(index='day_of_week', columns='hour', aggfunc='size', fill_value=0)
+    days_order = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
+    heatmap_data = heatmap_data.reindex(days_order)
+
+    return heatmap_data
 
 def extract_peak_response_time_data(content):
     timestamp_pattern = re.compile(r"(\d{1,2}/\d{1,2}/\d{2,4}, \d{1,2}:\d{1,2}(?:\s?[APMapm]{2})?) - (.*?):")
@@ -624,6 +638,31 @@ def construct_prompt_from_data_avg_sentiments(avg_sentiments, type):
         prompt += "Please provide a sarcastic fun analysis of the data. Be intelligent, bold, you can get creative here (not super long please). Theres a saying in brazil; 'The zueira never ends!' take this saying seriously."
     prompt += " Em português, por favor."
     
+    return prompt
+
+def construct_prompt_for_activity_analysis(heatmap_data, analysis_type):
+    """
+    Constructs a human-like prompt from the activity heatmap data.
+    """
+    # Summarize the activity heatmap data
+    summary = "The data presents an activity heatmap of messages in a WhatsApp group chat, showing message frequency by hour and day of the week. Here are some insights:\n"
+
+    # Iterate over each day and hour to summarize activity patterns
+    for day in heatmap_data.index:
+        for hour in heatmap_data.columns:
+            message_count = heatmap_data.at[day, hour]
+            if message_count > 0:  # Only include active hours
+                summary += f"- On {day}, at {hour}:00, the number of messages was {message_count}.\n"
+
+    # Tailor the prompt based on the analysis type
+    if analysis_type == 'technical':
+        prompt = summary + "Please provide a technical analysis of the group's interaction dynamics based on this activity pattern."
+    elif analysis_type == 'fun':
+        prompt = summary + "Let's make this fun. Give a creative and lighthearted interpretation of the group's activity pattern."
+    elif analysis_type == 'zoeira':
+        prompt = summary + "Provide a humorous and possibly sarcastic analysis of the group's activity. Remember, 'The zueira never ends!'"
+    prompt += " Em português, por favor."
+
     return prompt
 
 
@@ -1062,7 +1101,7 @@ def analyse_sentiment_over_time():
         # Construct a prompt for the ChatGPT API based on the sentiment data
         prompt = construct_prompt_for_sentiment_analysis(df, analysis_type)
 
-        print(prompt)
+        # print(prompt)
 
         length = 350 if analysis_type == 'technical' else 400 if analysis_type == 'fun' else 500 if analysis_type == 'zoeira' else 300
         chatgpt_response = call_chatgpt_api(prompt, "gpt-3.5-turbo", length, temperature)
@@ -1121,7 +1160,7 @@ def analyse_peak_response_time():
         # Construct a prompt for further analysis
         prompt = construct_prompt_for_peak_response_time_analysis(avg_hourly_messages, dominant_sender, analysis_type)
 
-        print(prompt)
+        # print(prompt)
 
         # Call ChatGPT API
         length = 350 if analysis_type == 'technical' else 400 if analysis_type == 'fun' else 500 if analysis_type == 'zoeira' else 300
@@ -1191,27 +1230,10 @@ def activity_heatmap():
 
     try:
 
-        # Define a regex pattern to extract date and time details
-        date_time_pattern = re.compile(r"(\d{1,2}/\d{1,2}/\d{2,4}), (\d{1,2}:\d{1,2})\s[APMapm]{2}")
+        heatmap_data = extract_activity_data(content)
 
-        # Extract date and time details
-        date_times = [date_time_pattern.search(line).groups() for line in content if date_time_pattern.search(line)]
-        dates, times = zip(*date_times)
-
-        # Convert to pandas datetime format for easier manipulation
-        date_times = pd.to_datetime([' '.join(item) for item in zip(dates, times)], errors='coerce')
-        df = pd.DataFrame({'datetime': date_times})
-
-        # Extract day of week and hour from the datetime
-        df['day_of_week'] = df['datetime'].dt.day_name()
-        df['hour'] = df['datetime'].dt.hour
-
-        # Create a pivot table for the heatmap
-        heatmap_data = df.pivot_table(index='day_of_week', columns='hour', aggfunc='size', fill_value=0)
-
-        # Define the order of days for the y-axis
-        days_order = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
-        heatmap_data = heatmap_data.reindex(days_order)
+        if heatmap_data.empty:
+            return jsonify({'status': 'error', 'message': "No data available for analysis"}), 400
 
         # Plotting the heatmap
         plt.figure(figsize=(14, 7))
@@ -1231,6 +1253,41 @@ def activity_heatmap():
     except Exception as e:
         logging.exception("An unexpected error occurred.")
         return jsonify({'status': 'error', 'message': str(e)}), 500
+
+@app.route('/whatsapp/message/activity_heatmap/analyse', methods=['POST'])
+def analyse_activity_heatmap():
+    content, error_message, error_code = process_file(request)
+    if content is None:
+        return jsonify({'status': 'error', 'message': error_message}), error_code
+
+    try:
+        data = json.loads(request.form.get('data', '{}'))
+        analysis_type = data.get('type', 'technical')
+        temperature = data.get('temperature', 0)
+
+        heatmap_data = extract_activity_data(content)
+
+        if heatmap_data.empty:
+            return jsonify({'status': 'error', 'message': "No data available for analysis"}), 400
+
+        # Construct a prompt for further analysis
+        prompt = construct_prompt_for_activity_analysis(heatmap_data, analysis_type)
+
+        # print(prompt)
+
+        # Adjusting the length based on the analysis type
+        length = 350 if analysis_type == 'technical' else 400 if analysis_type == 'fun' else 500 if analysis_type == 'zoeira' else 300
+
+        # Call ChatGPT API
+        chatgpt_response = call_chatgpt_api(prompt, "gpt-3.5-turbo", length, temperature)
+
+        # Returning the response
+        return jsonify({'response': chatgpt_response})
+
+    except Exception as e:
+        logging.exception("An unexpected error occurred.")
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
 
 @app.route('/whatsapp/message/user_activity_over_time', methods=['POST'])
 def user_activity_over_time():
@@ -1291,7 +1348,7 @@ def get_top_emojis_json(top_n=10):
         all_emojis = [emoji for message in messages for emoji in extract_emojis(message)]
         emoji_counts = Counter(all_emojis)
 
-        print(emoji_counts)
+        # print(emoji_counts)
 
         # Prepare data for output
         sorted_emoji_counts = sorted(emoji_counts.items(), key=lambda x: x[1], reverse=True)[:top_n]
