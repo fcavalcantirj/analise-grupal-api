@@ -426,6 +426,20 @@ def construct_prompt_for_peak_response_time_analysis(avg_hourly_messages, domina
 
     return prompt
 
+def extract_conversational_turns_data(content):
+    sender_pattern = re.compile(r"\d{1,2}/\d{1,2}/\d{2,4}, \d{1,2}:\d{1,2}\s[APMapm]{2} - (.*?):")
+    senders = [sender_pattern.search(line).group(1) if sender_pattern.search(line) else None for line in content]
+    senders = [sender for sender in senders if sender is not None]
+
+    turn_counts = defaultdict(int)
+    previous_sender = None
+    for sender in senders:
+        if sender != previous_sender:
+            turn_counts[sender] += 1
+        previous_sender = sender
+
+    return turn_counts
+
 def extract_activity_data(content):
     date_time_pattern = re.compile(r"(\d{1,2}/\d{1,2}/\d{2,4}), (\d{1,2}:\d{1,2})\s[APMapm]{2}")
     date_times = [date_time_pattern.search(line).groups() for line in content if date_time_pattern.search(line)]
@@ -661,6 +675,29 @@ def construct_prompt_for_activity_analysis(heatmap_data, analysis_type):
         prompt = summary + "Let's make this fun. Give a creative and lighthearted interpretation of the group's activity pattern."
     elif analysis_type == 'zoeira':
         prompt = summary + "Provide a humorous and possibly sarcastic analysis of the group's activity. Remember, 'The zueira never ends!'"
+    prompt += " Em português, por favor."
+
+    return prompt
+
+def construct_prompt_for_conversational_turns_analysis(turn_counts, analysis_type):
+    """
+    Constructs a prompt based on conversational turns data.
+    """
+    summary = "The data shows the number of conversational turns taken by each participant in a WhatsApp group chat. Here are the key insights:\n"
+
+    # Sorting and selecting top participants for a concise summary
+    sorted_turn_counts = sorted(turn_counts.items(), key=lambda x: x[1], reverse=True)[:10]  # Example: Top 10 participants
+
+    for sender, count in sorted_turn_counts:
+        summary += f"- {sender} took {count} turns in the conversation.\n"
+
+    # Tailoring the prompt based on the analysis type
+    if analysis_type == 'technical':
+        prompt = summary + "Please provide a technical analysis of these conversational dynamics."
+    elif analysis_type == 'fun':
+        prompt = summary + "Let's make this fun. Can you provide a creative interpretation of these conversational dynamics?"
+    elif analysis_type == 'zoeira':
+        prompt = summary + "Provide a humorous or sarcastic take on these conversational patterns. Remember, 'The zueira never ends!'"
     prompt += " Em português, por favor."
 
     return prompt
@@ -1375,18 +1412,7 @@ def plot_conversational_turns():
 
     try:
 
-        # Define a regex pattern to extract the sender of each message
-        sender_pattern = re.compile(r"\d{1,2}/\d{1,2}/\d{2,4}, \d{1,2}:\d{1,2}\s[APMapm]{2} - (.*?):")
-        senders = [sender_pattern.search(line).group(1) if sender_pattern.search(line) else None for line in content]
-        senders = [sender for sender in senders if sender is not None]
-     
-        # Count the conversational turns
-        turn_counts = defaultdict(int)
-        previous_sender = None
-        for sender in senders:
-            if sender != previous_sender:
-                turn_counts[sender] += 1
-            previous_sender = sender
+        turn_counts = extract_conversational_turns_data(content)
 
         N = 20  # Number of senders with the most conversational turns to display
         M = 5  # Number of senders with the fewest conversational turns to display
@@ -1417,6 +1443,38 @@ def plot_conversational_turns():
 
         # Send the saved image file as the response
         return send_file(temp_file.name, mimetype='image/png')
+
+    except Exception as e:
+        logging.exception("An unexpected error occurred.")
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+@app.route('/whatsapp/message/conversational_turns/analyse', methods=['POST'])
+def analyse_conversational_turns():
+    content, error_message, error_code = process_file(request)
+    if content is None:
+        return jsonify({'status': 'error', 'message': error_message}), error_code
+
+    try:
+        data = json.loads(request.form.get('data', '{}'))
+        analysis_type = data.get('type', 'technical')  # Default to 'technical' if not provided
+        temperature = data.get('temperature', 0)      # Default to 0 if not provided
+
+        turn_counts = extract_conversational_turns_data(content)
+
+        if not turn_counts:
+            return jsonify({'status': 'error', 'message': "No data available for analysis"}), 400
+
+        # Construct a prompt for further analysis
+        prompt = construct_prompt_for_conversational_turns_analysis(turn_counts, analysis_type)
+
+        # Adjusting the length based on the analysis type
+        length = 350 if analysis_type == 'technical' else 400 if analysis_type == 'fun' else 500 if analysis_type == 'zoeira' else 300
+
+        # Call ChatGPT API
+        chatgpt_response = call_chatgpt_api(prompt, "gpt-3.5-turbo", length, temperature)
+
+        # Returning the ChatGPT API response
+        return jsonify(chatgpt_response)
 
     except Exception as e:
         logging.exception("An unexpected error occurred.")
