@@ -2195,7 +2195,7 @@ def analyse_sentiment_distribution():
 
         prompt = construct_prompt_for_sentiment_distribution_analysis(sentiments, analysis_type)
 
-        # print(prompt)
+        print(prompt)
 
         length = 350 if analysis_type == 'technical' else 400 if analysis_type == 'fun' else 500 if analysis_type == 'zoeira' else 300
         chatgpt_response = call_chatgpt_api(prompt, "gpt-3.5-turbo", length, temperature)
