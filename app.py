@@ -479,7 +479,7 @@ def construct_prompt_for_sentiment_analysis(df, analysis_type):
     num_months = len(monthly_avg)
     summary = "The data shows how sentiment scores vary over time in a WhatsApp group chat, summarized by month. "
 
-    if num_months > 30:
+    if num_months > 72:
         # For larger datasets, focus on significant changes or patterns
         significant_changes = identify_significant_changes(monthly_avg)
         summary += "Here are some significant changes and patterns:\n" + significant_changes
