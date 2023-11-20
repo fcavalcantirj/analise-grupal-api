@@ -761,22 +761,30 @@ def construct_prompt_for_active_days_analysis(day_counts, analysis_type):
 
     return prompt
 
-def construct_prompt_for_wordcloud_analysis(text, analysis_type):
+def construct_prompt_for_wordcloud_analysis(wordcloud: WordCloud, analysis_type):
     """
-    Constructs a prompt based on word cloud data.
+    Constructs a prompt based on a WordCloud object.
     """
-    summary = "The word cloud generated from a WhatsApp group chat's messages highlights the following prominent words: " + text + ".\n"
+    # Extract words and their frequencies from the WordCloud
+    word_frequencies = wordcloud.words_
+    sorted_words = sorted(word_frequencies.items(), key=lambda x: x[1], reverse=True)
+    
+    # Building a summary of the most prominent words
+    prominent_words_summary = ', '.join([f"'{word}'" for word, freq in sorted_words[:10]])  # top 10 words
+
+    summary = f"A word cloud generated from a WhatsApp group chat's messages highlights key words such as {prominent_words_summary}. These words might reflect the chat's prevalent themes or topics.\n"
 
     # Tailoring the prompt based on the analysis type
     if analysis_type == 'technical':
-        prompt = summary + "Please provide a technical analysis of what these prominent words might suggest about the group's main topics of discussion, interests, or behavior patterns."
+        prompt = summary + "Please provide a technical analysis of what these words might suggest about the group's main topics of discussion, interests, or behavior patterns."
     elif analysis_type == 'fun':
-        prompt = summary + "Let's approach this creatively. Can you give an entertaining interpretation of what these words reveal about the group's character or dynamics?"
+        prompt = summary + "Let's approach this creatively. What could these words reveal in an entertaining way about the group's character or dynamics?"
     elif analysis_type == 'zoeira':
-        prompt = summary + "How about a humorous or sarcastic take on these words? What amusing insights can you offer? Remember, 'The zueira never ends!'"
+        prompt = summary + "How about a humorous or sarcastic take on these words? What amusing insights might they offer about the group? Remember, 'The zueira never ends!'"
     prompt += " Em português, por favor."
 
     return prompt
+
 
 def construct_prompt_for_lengthiest_messages_analysis(sorted_average_lengths, analysis_type):
     """
@@ -2071,9 +2079,11 @@ def analyse_wordcloud():
         if not text.strip():
             return jsonify({'status': 'error', 'message': "No data available for analysis"}), 400
 
-        prompt = construct_prompt_for_wordcloud_analysis(text, analysis_type)
+        wordcloud = WordCloud(background_color='white', width=800, height=400, max_words=200).generate(text)
 
-        # print(prompt)
+        prompt = construct_prompt_for_wordcloud_analysis(wordcloud, analysis_type)
+
+        print(prompt)
 
         length = 350 if analysis_type == 'technical' else 400 if analysis_type == 'fun' else 500 if analysis_type == 'zoeira' else 300
         chatgpt_response = call_chatgpt_api(prompt, "gpt-3.5-turbo", length, temperature)
